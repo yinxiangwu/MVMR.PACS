@@ -1,4 +1,4 @@
-#
+# Code from https://github.com/verena-zuber/demo_AMD
 # 11th April 2019
 # Calculating the lasso estimate using the multivariable input data 
 
