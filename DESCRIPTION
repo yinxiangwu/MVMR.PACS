@@ -1,0 +1,21 @@
+Package: MVMR.PACS
+Title: Group Identification and Variable Selection for Multivariable Mendelian Randomization with Highly Correlated Exposures
+Version: 0.1
+Authors@R: 
+    person("Yinxiang", "Wu", , "wuyx@uw.edu", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0001-7806-6999"))
+Description: Implements MVMR-PACS estimator for group identification and variable selection in two-sample summary-data multivariable Mendelian randomization with highly-correlated exposures.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.2.3
+Imports:
+    MASS,
+    Matrix,
+    doParallel,
+    foreach,
+    datathin,
+    BDcocolasso,
+    mr.divw,
+    MVMR,
+    magrittr
