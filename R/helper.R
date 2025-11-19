@@ -76,13 +76,13 @@ dIVW_PACS_cluster=function(beta.exposure,se.exposure,beta.outcome,se.outcome,lam
 
   # — Precompute weight matrices and related quantities —
   W   <- Matrix::Diagonal(x = 1/se.outcome^2)
-  M   <- crossprod(beta.exposure, W %*% beta.exposure)
+  M   <- Matrix::crossprod(beta.exposure, W %*% beta.exposure)
   A_weighted <- se.exposure / matrix(se.outcome, nrow = p, ncol = K, byrow = FALSE)
-  S <- t(A_weighted) %*% A_weighted
+  S <- Matrix::t(A_weighted) %*% A_weighted
   V <- P * S
   MV  <- M - V
   MVplus <- BDcocolasso::ADMM_proj(as.matrix(MV)/sqrt(p), epsilon = eps)$mat * sqrt(p)
-  XWy <- crossprod(beta.exposure, W %*% beta.outcome)
+  XWy <- Matrix::crossprod(beta.exposure, W %*% beta.outcome)
 
   # — Iterative update —
   betal <- betawt
@@ -94,11 +94,11 @@ dIVW_PACS_cluster=function(beta.exposure,se.exposure,beta.outcome,se.outcome,lam
     D2 <- Matrix::Diagonal(x = ascvec[(K + 1):(K + qp)] / (as.numeric(abs(dm %*% old)) + littleeps))
     D3 <- Matrix::Diagonal(x = ascvec[(K + qp + 1):(K + 2 * qp)] / (as.numeric(abs(dp %*% old)) + littleeps))
 
-    A <- MVplus + lambda * (D1 + t(dm) %*% D2 %*% dm + t(dp) %*% D3 %*% dp)
+    A <- MVplus + lambda * (D1 + Matrix::t(dm) %*% D2 %*% dm + Matrix::t(dp) %*% D3 %*% dp)
 
     # Use solve() if A is well-conditioned; otherwise use MASS::ginv()
     if (rcond(as.matrix(A)) > .Machine$double.eps) {
-      betal_new <- as.numeric(solve(A, XWy))
+      betal_new <- as.numeric(Matrix::solve(A, XWy))
     } else {
       betal_new <- as.numeric(MASS::ginv(as.matrix(A)) %*% XWy)
     }
@@ -125,6 +125,93 @@ dIVW_PACS_cluster=function(beta.exposure,se.exposure,beta.outcome,se.outcome,lam
     iter         = iter
   )
 }
+
+SRIVW <- function (beta.exposure, se.exposure, beta.outcome, se.outcome, gen_cor = NULL, phi_cand = 0, over.dispersion = FALSE)
+{
+  if (ncol(beta.exposure) <= 1 | ncol(se.exposure) <= 1) {
+    stop("this function is developed for multivariable MR")
+  }
+  K <- ncol(beta.exposure)
+  if (nrow(beta.exposure) != length(beta.outcome)) {
+    stop("The number of SNPs in beta.exposure and beta.outcome is different")
+  }
+  beta.exposure <- as.matrix(beta.exposure)
+  se.exposure <- as.matrix(se.exposure)
+  p <- nrow(beta.exposure)
+  W <- diag(se.outcome^(-2))
+  Vj <- lapply(1:p, function(j) diag(se.exposure[j, ]) %*%
+                 gen_cor[[j]] %*% diag(se.exposure[j, ]))
+  Vj_root_inv <- lapply(1:p, function(j) {
+    P_eigen <- eigen(gen_cor[[j]])
+    P_root_inv <- P_eigen$vectors %*% diag(1/sqrt(P_eigen$values)) %*%
+      t(P_eigen$vectors)
+    P_root_inv %*% diag(1/se.exposure[j, ])
+  })
+  IV_strength_matrix <- Reduce("+", lapply(1:p, function(j) {
+    beta.exposure.V <- Vj_root_inv[[j]] %*% beta.exposure[j, ]
+    beta.exposure.V %*% t(beta.exposure.V)
+  })) - p * diag(K)
+  iv_strength_parameter <- min(eigen(IV_strength_matrix/sqrt(p))$values)
+  V <- Reduce("+", lapply(1:p, function(j) {
+    Vj[[j]] * (se.outcome[j]^(-2))
+  }))
+  M <- t(beta.exposure) %*% W %*% beta.exposure
+  MV <- M - V
+  MV_eigvalues <- eigen(MV)$values
+  MV_eigen <- eigen(MV)
+  if (is.null(phi_cand)) {
+    phi_cand <- c(0, exp(seq(0, 17, by = 0.5) - min(iv_strength_parameter)))
+  }
+  phi_length <- length(phi_cand)
+  MV.l.inv.long <- Reduce(rbind, lapply(1:phi_length, function(l) {
+    MV_eigen$vectors %*% diag(1/(MV_eigvalues + phi_cand[l]/MV_eigvalues)) %*%
+      t(MV_eigen$vectors)
+  }))
+  beta.est <- MV.l.inv.long %*% t(beta.exposure) %*% W %*%
+    (beta.outcome)
+  prof.lik <- sapply(1:phi_length, function(l) {
+    beta.hat <- beta.est[(1 + (l - 1) * K):(l * K)]
+    bvb <- sapply(1:p, function(j) t(beta.hat) %*% Vj[[j]] %*%
+                    beta.hat)
+    tau2 <- 0
+    S <- diag(1/(se.outcome^2 + bvb + tau2))
+    1/p * t(beta.outcome - beta.exposure %*% beta.hat) %*%
+      S %*% (beta.outcome - beta.exposure %*% beta.hat)
+  })
+  phi_selected <- phi_cand[which.min(prof.lik)]
+  MV.l.inv <- MV_eigen$vectors %*% diag(1/(MV_eigvalues +
+                                             phi_selected/MV_eigvalues)) %*% t(MV_eigen$vectors)
+  mvmr.adIVW <- MV.l.inv %*% t(beta.exposure) %*% W %*%
+    beta.outcome
+  if (over.dispersion) {
+    tau2_adivw <- Reduce("+",lapply(1:p, function(j) {
+      v <- Vj[[j]] * (se.outcome[j]^(-2))
+      (beta.outcome[j] - beta.exposure[j,] %*% mvmr.adIVW)^2*se.outcome[j]^(-2) - 1 - as.numeric(t(mvmr.adIVW) %*% v %*% mvmr.adIVW)
+    }))/sum(diag(W))
+    tau2_adivw <- as.numeric(tau2_adivw)
+    if (tau2_adivw < 0) {
+      tau2_adivw <- 0
+      warning("Estimated overdispersion parameter < 0. Fixed at 0 instead.")
+    }
+  } else {
+    tau2_adivw <- 0
+  }
+  adIVW_Vt <- Reduce("+", lapply(1:p, function(j) {
+    m <- beta.exposure[j, ] %*% t(beta.exposure[j, ]) *
+      (se.outcome[j]^(-2))
+    v <- Vj[[j]] * (se.outcome[j]^(-2))
+    bvb <- as.numeric(t(mvmr.adIVW) %*% v %*% mvmr.adIVW)
+    vbbv <- v %*% mvmr.adIVW %*% t(mvmr.adIVW) %*% v
+    m * (1 + bvb + tau2_adivw * se.outcome[j]^(-2)) +
+      vbbv
+  }))
+  mvmr.adIVW.se <- sqrt(diag(MV.l.inv %*% adIVW_Vt %*%
+                               MV.l.inv))
+  return(list(beta.hat = as.vector(mvmr.adIVW), beta.se = as.vector(mvmr.adIVW.se),
+              iv_strength_parameter = iv_strength_parameter, phi_selected = phi_selected,
+              tau.square = tau2_adivw))
+}
+
 
 groupAssignment <- function(beta, digit = 3) {
   beta <- round(beta, digit)
@@ -230,7 +317,7 @@ computeGroupedData <- function(beta.exposure, se.exposure, P, G) {
               P_grouped = P_grouped))
 }
 
-SRIVW_group_est <- function(beta.exposure,se.exposure,beta.outcome,se.outcome,P,est_beta,include_zero_group = FALSE, digit = 3) {
+SRIVW_group_est <- function(beta.exposure,se.exposure,beta.outcome,se.outcome,P,est_beta,include_zero_group = FALSE, digit = 3, over.dispersion = FALSE) {
   K <- ncol(beta.exposure)
   p <- nrow(beta.exposure)
   # construct transformation matrix for beta-exposure associations
@@ -244,14 +331,15 @@ SRIVW_group_est <- function(beta.exposure,se.exposure,beta.outcome,se.outcome,P,
 
   if (L == 1) {
     final_fit <- mr.divw::mr.divw(beta.exposure = group_dat$beta.exposure,beta.outcome = beta.outcome,
-                         se.exposure = group_dat$se.exposure,se.outcome = se.outcome)
+                         se.exposure = group_dat$se.exposure,se.outcome = se.outcome, over.dispersion = over.dispersion)
     beta_est <- final_fit$beta.hat %*% G_collapse
     beta_se <- final_fit$beta.se %*% G_collapse
     iv.strength.dt <- final_fit$condition
   } else {
-    final_fit <- mr.divw::mvmr.srivw(beta.exposure = group_dat$beta.exposure, beta.outcome = beta.outcome,
+    print(group_dat$P_grouped)
+    final_fit <- SRIVW(beta.exposure = group_dat$beta.exposure, beta.outcome = beta.outcome,
                        se.exposure = group_dat$se.exposure, se.outcome = se.outcome,
-                       phi_cand = NULL, gen_cor = group_dat$P_grouped)
+                       phi_cand = NULL, gen_cor = group_dat$P_grouped, over.dispersion = over.dispersion)
     beta_est <- final_fit$beta.hat %*% G_collapse
     beta_se <- abs(final_fit$beta.se %*% G_collapse)
     iv.strength.dt <- final_fit$iv_strength_parameter
@@ -439,7 +527,7 @@ obtain_initial <- function(
           phi           = phi_cand[jphi]
         )
         b <- as.numeric(b)  # ensure vector
-        obj_f_ridge[l + (m-1)*CV_fold, jphi] <- drop(crossprod(b, MV_plus.test %*% b)) - 2 * sum(c.test * b)
+        obj_f_ridge[l + (m-1)*CV_fold, jphi] <- drop(Matrix::crossprod(b, MV_plus.test %*% b)) - 2 * sum(c.test * b)
       }
     }
   }

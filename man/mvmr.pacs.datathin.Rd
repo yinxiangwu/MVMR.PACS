@@ -14,6 +14,7 @@ mvmr.pacs.datathin(
   rr_cut_off = 0,
   tau = c(0.5, 1, 2, 3),
   fold = 5,
+  over.dispersion = FALSE,
   re = 1,
   n_times = 1,
   epsilon = 1e-04,
@@ -40,6 +41,8 @@ mvmr.pacs.datathin(
 \item{tau}{Tuning parameter range. Default = c(0.5, 1, 2, 3).}
 
 \item{fold}{The number of folds for cross validation based on multifold data thinning. Default = 5.}
+
+\item{over.dispersion}{Should SRIVW consider balanced horizontal pleiotropy when performing inference? Default is FALSE.}
 
 \item{re}{The number of repeated data thinning procedure. Default = 1. Increase this number of assess robustness of results.}
 

@@ -9,6 +9,7 @@
 #' @param rr_cut_off Pre-specified cut-off used in different weighting schemes, specified by type argument.
 #' @param tau Tuning parameter range. Default = c(0.5, 1, 2, 3).
 #' @param fold The number of folds for cross validation based on multifold data thinning. Default = 5.
+#' @param over.dispersion Should SRIVW consider balanced horizontal pleiotropy when performing inference? Default is FALSE.
 #' @param re The number of repeated data thinning procedure. Default = 1. Increase this number of assess robustness of results.
 #' @param n_times The number of cross validation runs when selecting tuning parameters within the selection dataset. Default = 1.
 #' @param epsilon Tolerance level for ADMM.proj. Default = 1e-4.
@@ -27,7 +28,7 @@
 #' @export
 #'
 #' @examples
-mvmr.pacs.datathin <- function(beta.exposure, se.exposure, beta.outcome, se.outcome, P, type = 2, rr_cut_off = 0, tau = c(0.5,1,2,3),fold = 5,
+mvmr.pacs.datathin <- function(beta.exposure, se.exposure, beta.outcome, se.outcome, P, type = 2, rr_cut_off = 0, tau = c(0.5,1,2,3),fold = 5,over.dispersion = FALSE,
                                   re = 1, n_times = 1,  epsilon = 1e-4, digit = 3, include_zero_group = FALSE, lambda.1se = TRUE) {
 
   # default is splitting the data into 10 folds, using half to pick grouping, the other half to perform estimation
@@ -119,7 +120,7 @@ mvmr.pacs.datathin <- function(beta.exposure, se.exposure, beta.outcome, se.outc
 
     res_dt1 <- SRIVW_group_est(beta.exposure = beta.exposure.train,se.exposure = se.exposure.train,
                                beta.outcome = beta.outcome.train,se.outcome = se.outcome.train,
-                               P = P, est_beta = pacs_res$beta, digit = digit, include_zero_group = include_zero_group)
+                               P = P, est_beta = pacs_res$beta, digit = digit, include_zero_group = include_zero_group, over.dispersion = over.dispersion)
 
     iv.hist.dt1[r] <- res_dt1$iv_strength
 
@@ -130,7 +131,7 @@ mvmr.pacs.datathin <- function(beta.exposure, se.exposure, beta.outcome, se.outc
 
     res_dt2 <- SRIVW_group_est(beta.exposure = beta.exposure.test,se.exposure = se.exposure.test,
                                beta.outcome = beta.outcome.test,se.outcome = se.outcome.test,
-                               P = P, est_beta = pacs_res$beta, digit = digit, include_zero_group = include_zero_group)
+                               P = P, est_beta = pacs_res$beta, digit = digit, include_zero_group = include_zero_group, over.dispersion = over.dispersion)
 
     beta_est[r,] <- res_dt2$beta_est
 
