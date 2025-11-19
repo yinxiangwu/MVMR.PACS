@@ -2,6 +2,7 @@
 
 export(mvmr.pacs)
 export(mvmr.pacs.datathin)
+export(obtain_initial)
 importFrom(Matrix,sparseMatrix)
 importFrom(datathin,datathin)
 importFrom(foreach,"%dopar%")
