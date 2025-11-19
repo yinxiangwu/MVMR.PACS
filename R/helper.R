@@ -336,7 +336,6 @@ SRIVW_group_est <- function(beta.exposure,se.exposure,beta.outcome,se.outcome,P,
     beta_se <- final_fit$beta.se %*% G_collapse
     iv.strength.dt <- final_fit$condition
   } else {
-    print(group_dat$P_grouped)
     final_fit <- SRIVW(beta.exposure = group_dat$beta.exposure, beta.outcome = beta.outcome,
                        se.exposure = group_dat$se.exposure, se.outcome = se.outcome,
                        phi_cand = NULL, gen_cor = group_dat$P_grouped, over.dispersion = over.dispersion)
