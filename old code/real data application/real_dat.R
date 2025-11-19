@@ -10,10 +10,10 @@ library(MRcML)
 library(MVMRcML)
 library(doParallel)
 library(foreach)
+library(MVMR.PACS)
 setwd('~/OneDrive - UW/UW biostats/2023-24 RA/MR with highly correlated exposure/manuscript/code/my functions/')
 link_to_dat <- '~/OneDrive - UW/UW biostats/2023-24 RA/MR with highly correlated exposure/manuscript/lipids_processed_data/'
 source('mvMR_glmnet.R')
-source('PACS_funs_091125.R')
 source("summary_mvMR_BF.R")
 source("summary_mvMR_SSS.R")
 
