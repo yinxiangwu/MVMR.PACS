@@ -52,7 +52,7 @@ mvmr.pacs <- function(beta.exposure, se.exposure, beta.outcome, se.outcome, P, t
 
   if (is.null(betawt)) {
     # obtain initial beta estimates for subsequent estimators
-    betawt <- obtain_initial(beta.exposure, se.exposure, beta.outcome, se.outcome, iv_strength_parameter, P)
+    betawt <- obtain_initial(beta.exposure, se.exposure, beta.outcome, se.outcome, iv_strength_parameter, P, lambda.length = lambda.length, seed = seed, epsilon = eps, CV_fold = CV_fold, n_times = n_times, lambda.1se = lambda.1se)
   }
 
   # Fit dIVW PACS: create weight matrix and grid of tuning parameters
