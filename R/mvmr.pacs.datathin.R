@@ -221,10 +221,10 @@ mvmr.pacs.datathin <- function(
   res$condF.dt1 <- condF.dt1
   res$condF.dt2 <- condF.dt2
 
-  res$alpha.hist <- alpha_hist                    # NEW
-  res$invalid.snp.hist <- invalid.snp.hist        # NEW
-  res$n.invalid.snp <- n.invalid.snp              # NEW
-  res$pleiotropy <- pleiotropy                    # NEW
+  res$alpha.hist <- alpha_hist
+  res$invalid.snp.hist <- invalid.snp.hist
+  res$n.invalid.snp <- n.invalid.snp
+  res$pleiotropy <- pleiotropy
 
   return(res)
 }
