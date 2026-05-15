@@ -14,111 +14,196 @@ NULL
 # and variable selection in regression with correlated predictors.  #
 # Pubmed: 23772171                                                  #
 #####################################################################
-dIVW_PACS_cluster=function(beta.exposure,se.exposure,beta.outcome,se.outcome,lambda,betawt,P,RR,tau = 1,type=1,rr=0,digit=3,eps=1e-4,max.iter = 1000,err=1e-4)
-{
-  if(lambda <=0) {return(cat("ERROR: Lambda must be > 0. \n"))}
-  if(rr <0) {return(cat("ERROR: RR must be >=0. \n"))}
-  if(rr >1) {return(cat("ERROR: RR must be <=1. \n"))}
-  if(eps <=0) {return(cat("ERROR: Eps must be > 0. \n"))}
-  if(!(type %in% 1:4)){return(cat("ERROR: Type must be 1, 2, 3 or 4. \n"))}
+dIVW_PACS_cluster <- function(
+    beta.exposure, se.exposure, beta.outcome, se.outcome,
+    lambda, betawt, P, RR,
+    tau = 1, type = 1, rr = 0, digit = 3,
+    eps = 1e-4, max.iter = 1000, err = 1e-4,
+    pleiotropy = FALSE,              # NEW
+    lambda.alpha = NULL,             # NEW
+    alpha.init = NULL                 # NEW
+) {
+  if (lambda <= 0) stop("lambda must be > 0.")
+  if (rr < 0) stop("rr must be >= 0.")
+  if (rr > 1) stop("rr must be <= 1.")
+  if (eps <= 0) stop("eps must be > 0.")
+  if (!(type %in% 1:4)) stop("type must be 1, 2, 3 or 4.")
+
+  # NEW: check pleiotropy tuning parameter
+  if (pleiotropy) {
+    if (is.null(lambda.alpha)) {
+      return(cat("ERROR: lambda.alpha must be provided when pleiotropy = TRUE. \n"))
+    }
+    if (lambda.alpha < 0) {
+      return(cat("ERROR: lambda.alpha must be >= 0. \n"))
+    }
+  }
+
   # data preparation
   p <- length(beta.outcome)
   K <- ncol(beta.exposure)
-  littleeps=10^-7
-  # require p>1
-  qp=K*(K-1)/2
-  vc=0
-  row.vec1=0
-  col.vec1=0
-  for(w in 1:(K-1))
-  {
-    row.vec1=c(row.vec1,c((vc+1):(vc+(K-w))))
-    col.vec1=c(col.vec1,rep(w,length(c((vc+1):(vc+(K-w))))))
-    vc=vc+(K-w)
-  }
-  c1=1
-  c2=K-1
-  row.vec2=0
-  col.vec2=0
-  for(w in 1:(K-1))
-  {
-    row.vec2=c(row.vec2,c(c1:c2))
-    col.vec2=c(col.vec2,c((w+1):K))
-    c1=c2+1
-    c2=c2+K-w-1
-  }
-  dm=Matrix::sparseMatrix(i=c(row.vec1[-1],row.vec2[-1]),j=c(col.vec1[-1],col.vec2[-1]),x=c(rep(1,qp),rep(-1,qp)))
-  dp=Matrix::sparseMatrix(i=c(row.vec1[-1],row.vec2[-1]),j=c(col.vec1[-1],col.vec2[-1]),x=c(rep(1,qp),rep(1,qp)))
-  rm(c1,c2,w,vc,row.vec1,col.vec1,row.vec2,col.vec2)
+  littleeps <- 10^-7
 
-  # — Construct penalty weight vector ascvec based on type —
+  qp <- K * (K - 1) / 2
+  vc <- 0
+  row.vec1 <- 0
+  col.vec1 <- 0
+  for(w in 1:(K - 1)) {
+    row.vec1 <- c(row.vec1, c((vc + 1):(vc + (K - w))))
+    col.vec1 <- c(col.vec1, rep(w, length(c((vc + 1):(vc + (K - w))))))
+    vc <- vc + (K - w)
+  }
+
+  c1 <- 1
+  c2 <- K - 1
+  row.vec2 <- 0
+  col.vec2 <- 0
+  for(w in 1:(K - 1)) {
+    row.vec2 <- c(row.vec2, c(c1:c2))
+    col.vec2 <- c(col.vec2, c((w + 1):K))
+    c1 <- c2 + 1
+    c2 <- c2 + K - w - 1
+  }
+
+  dm <- Matrix::sparseMatrix(
+    i = c(row.vec1[-1], row.vec2[-1]),
+    j = c(col.vec1[-1], col.vec2[-1]),
+    x = c(rep(1, qp), rep(-1, qp))
+  )
+
+  dp <- Matrix::sparseMatrix(
+    i = c(row.vec1[-1], row.vec2[-1]),
+    j = c(col.vec1[-1], col.vec2[-1]),
+    x = c(rep(1, qp), rep(1, qp))
+  )
+
+  rm(c1, c2, w, vc, row.vec1, col.vec1, row.vec2, col.vec2)
+
+  # Construct penalty weight vector ascvec based on type
   abs_dm_b <- as.vector(abs(dm %*% betawt))
   abs_dp_b <- as.vector(abs(dp %*% betawt))
 
   if (type == 1) {
-    ascvec <- c(1/abs(betawt)^tau, 1/abs_dm_b^tau, 1/abs_dp_b^tau)
+    ascvec <- c(1 / abs(betawt)^tau, 1 / abs_dm_b^tau, 1 / abs_dp_b^tau)
   } else if (type == 2) {
-    # For symmetric matrices, lower.tri extracts the unique pairs.
-    crm <- 1/(1 - RR[lower.tri(RR)])^tau
-    crp <- 1/(1 + RR[lower.tri(RR)])^tau
-    ascvec <- c(1/abs(betawt)^tau, crm/abs_dm_b^tau, crp/abs_dp_b^tau)
+    crm <- 1 / (1 - RR[lower.tri(RR)])^tau
+    crp <- 1 / (1 + RR[lower.tri(RR)])^tau
+    ascvec <- c(1 / abs(betawt)^tau, crm / abs_dm_b^tau, crp / abs_dp_b^tau)
   } else if (type == 3) {
     corp <- ifelse(RR[lower.tri(RR)] > rr, 1, 0)
     corm <- ifelse(RR[lower.tri(RR)] < -rr, 1, 0)
-    ascvec <- c(1/abs(betawt)^tau, corm/abs_dm_b^tau, corp/abs_dp_b^tau)
+    ascvec <- c(1 / abs(betawt)^tau, corm / abs_dm_b^tau, corp / abs_dp_b^tau)
   } else if (type == 4) {
     corp <- ifelse(RR[lower.tri(RR)] > rr, 1, 0)
-    crm  <- corp/(1 - RR[lower.tri(RR)])^tau
+    crm  <- corp / (1 - RR[lower.tri(RR)])^tau
     corm <- ifelse(RR[lower.tri(RR)] < -rr, 1, 0)
-    crp  <- corm/(1 + RR[lower.tri(RR)])^tau
-    ascvec <- c(1/abs(betawt)^tau, crm/abs_dm_b^tau, crp/abs_dp_b^tau)
+    crp  <- corm / (1 + RR[lower.tri(RR)])^tau
+    ascvec <- c(1 / abs(betawt)^tau, crm / abs_dm_b^tau, crp / abs_dp_b^tau)
   }
 
-  # — Precompute weight matrices and related quantities —
-  W   <- Matrix::Diagonal(x = 1/se.outcome^2)
-  M   <- Matrix::crossprod(beta.exposure, W %*% beta.exposure)
+  # Precompute weight matrices and debiased covariance
+  W <- Matrix::Diagonal(x = 1 / se.outcome^2)
+
+  M <- Matrix::crossprod(beta.exposure, W %*% beta.exposure)
+
   A_weighted <- se.exposure / matrix(se.outcome, nrow = p, ncol = K, byrow = FALSE)
   S <- Matrix::t(A_weighted) %*% A_weighted
   V <- P * S
-  MV  <- M - V
-  MVplus <- BDcocolasso::ADMM_proj(as.matrix(MV)/sqrt(p), epsilon = eps)$mat * sqrt(p)
-  XWy <- Matrix::crossprod(beta.exposure, W %*% beta.outcome)
 
-  # — Iterative update —
+  MV <- M - V
+  MVplus <- BDcocolasso::ADMM_proj(as.matrix(MV) / sqrt(p), epsilon = eps)$mat * sqrt(p)
+
+  # NEW: initialize alpha
+  if (pleiotropy) {
+    if (is.null(alpha.init)) {
+      alphal <- rep(0, p)
+    } else {
+      if (length(alpha.init) != p) {
+        return(cat("ERROR: alpha.init must have length equal to length(beta.outcome). \n"))
+      }
+      alphal <- as.numeric(alpha.init)
+    }
+  } else {
+    alphal <- rep(0, p)
+    lambda.alpha <- 0
+  }
+
+  # Iterative update
   betal <- betawt
+
   for (iter in seq_len(max.iter)) {
-    old <- betal
+    old.beta <- betal
+    old.alpha <- alphal
 
-    # Create diagonal penalty matrices using sparse Diagonals
-    D1 <- Matrix::Diagonal(x = ascvec[1:K] / (abs(old) + littleeps))
-    D2 <- Matrix::Diagonal(x = ascvec[(K + 1):(K + qp)] / (as.numeric(abs(dm %*% old)) + littleeps))
-    D3 <- Matrix::Diagonal(x = ascvec[(K + qp + 1):(K + 2 * qp)] / (as.numeric(abs(dp %*% old)) + littleeps))
+    # beta update given alpha
+    # NEW: replace beta.outcome by beta.outcome - alpha
+    XWy <- Matrix::crossprod(beta.exposure, W %*% (beta.outcome - alphal))
 
-    A <- MVplus + lambda * (D1 + Matrix::t(dm) %*% D2 %*% dm + Matrix::t(dp) %*% D3 %*% dp)
+    D1 <- Matrix::Diagonal(x = ascvec[1:K] / (abs(old.beta) + littleeps))
+    D2 <- Matrix::Diagonal(
+      x = ascvec[(K + 1):(K + qp)] /
+        (as.numeric(abs(dm %*% old.beta)) + littleeps)
+    )
+    D3 <- Matrix::Diagonal(
+      x = ascvec[(K + qp + 1):(K + 2 * qp)] /
+        (as.numeric(abs(dp %*% old.beta)) + littleeps)
+    )
 
-    # Use solve() if A is well-conditioned; otherwise use MASS::ginv()
+    A <- MVplus +
+      lambda * (
+        D1 +
+          Matrix::t(dm) %*% D2 %*% dm +
+          Matrix::t(dp) %*% D3 %*% dp
+      )
+
     if (rcond(as.matrix(A)) > .Machine$double.eps) {
       betal_new <- as.numeric(Matrix::solve(A, XWy))
     } else {
       betal_new <- as.numeric(MASS::ginv(as.matrix(A)) %*% XWy)
     }
 
-    if (max(abs((betal_new - old) / (abs(old) + littleeps))) < err) {
-      betal <- betal_new
+    # NEW: alpha update given beta via soft-thresholding
+    if (pleiotropy) {
+      r_alpha <- as.numeric(beta.outcome - beta.exposure %*% betal_new)
+
+      thresh <- lambda.alpha * se.outcome^2
+
+      alphal_new <- sign(r_alpha) * pmax(abs(r_alpha) - thresh, 0)
+    } else {
+      alphal_new <- rep(0, p)
+    }
+
+    beta.diff <- max(abs((betal_new - old.beta) / (abs(old.beta) + littleeps)))
+    alpha.diff <- max(abs(alphal_new - old.alpha)) / (max(abs(old.alpha)) + littleeps)
+
+    betal <- betal_new
+    alphal <- alphal_new
+
+    if (!all(is.finite(c(betal_new, alphal_new, beta.diff, alpha.diff)))) {
+      betal <- rep(NA_real_, K)
+      alphal <- rep(NA_real_, p)
       break
     }
-    betal <- betal_new
+
+    if (max(beta.diff, alpha.diff) < err) {
+      break
+    }
   }
 
   cls <- groupAssignment(betal, digit = digit)
 
   list(
     coefficients = betal,
+    alpha        = alphal,
+    invalid.snp  = which(abs(alphal) > littleeps),
     cls          = cls,
     cls_chr      = paste(cls, collapse = "-"),
     lambda       = lambda,
+    lambda.alpha = lambda.alpha,
+    pleiotropy   = pleiotropy,
     rr           = abs(rr),
     init         = betawt,
+    alpha.init   = alpha.init,
     type         = type,
     eps          = eps,
     littleeps    = littleeps,
