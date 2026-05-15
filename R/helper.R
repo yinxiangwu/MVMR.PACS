@@ -32,10 +32,10 @@ dIVW_PACS_cluster <- function(
   # NEW: check pleiotropy tuning parameter
   if (pleiotropy) {
     if (is.null(lambda.alpha)) {
-      return(cat("ERROR: lambda.alpha must be provided when pleiotropy = TRUE. \n"))
+      stop("ERROR: lambda.alpha must be provided when pleiotropy = TRUE. \n")
     }
     if (lambda.alpha < 0) {
-      return(cat("ERROR: lambda.alpha must be >= 0. \n"))
+      stop("ERROR: lambda.alpha must be >= 0. \n")
     }
   }
 
