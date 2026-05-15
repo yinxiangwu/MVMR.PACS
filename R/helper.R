@@ -80,25 +80,28 @@ dIVW_PACS_cluster <- function(
   rm(c1, c2, w, vc, row.vec1, col.vec1, row.vec2, col.vec2)
 
   # Construct penalty weight vector ascvec based on type
-  abs_dm_b <- as.vector(abs(dm %*% betawt))
-  abs_dp_b <- as.vector(abs(dp %*% betawt))
+  abs_b <- pmax(abs(betawt), littleeps)
+  abs_dm_b <- pmax(as.vector(abs(dm %*% betawt)), littleeps)
+  abs_dp_b <- pmax(as.vector(abs(dp %*% betawt)), littleeps)
+
+  RR <- pmin(pmax(RR, -1 + littleeps), 1 - littleeps)
 
   if (type == 1) {
-    ascvec <- c(1 / abs(betawt)^tau, 1 / abs_dm_b^tau, 1 / abs_dp_b^tau)
+    ascvec <- c(1 / abs_b^tau, 1 / abs_dm_b^tau, 1 / abs_dp_b^tau)
   } else if (type == 2) {
     crm <- 1 / (1 - RR[lower.tri(RR)])^tau
     crp <- 1 / (1 + RR[lower.tri(RR)])^tau
-    ascvec <- c(1 / abs(betawt)^tau, crm / abs_dm_b^tau, crp / abs_dp_b^tau)
+    ascvec <- c(1 / abs_b^tau, crm / abs_dm_b^tau, crp / abs_dp_b^tau)
   } else if (type == 3) {
     corp <- ifelse(RR[lower.tri(RR)] > rr, 1, 0)
     corm <- ifelse(RR[lower.tri(RR)] < -rr, 1, 0)
-    ascvec <- c(1 / abs(betawt)^tau, corm / abs_dm_b^tau, corp / abs_dp_b^tau)
+    ascvec <- c(1 / abs_b^tau, corm / abs_dm_b^tau, corp / abs_dp_b^tau)
   } else if (type == 4) {
     corp <- ifelse(RR[lower.tri(RR)] > rr, 1, 0)
     crm  <- corp / (1 - RR[lower.tri(RR)])^tau
     corm <- ifelse(RR[lower.tri(RR)] < -rr, 1, 0)
     crp  <- corm / (1 + RR[lower.tri(RR)])^tau
-    ascvec <- c(1 / abs(betawt)^tau, crm / abs_dm_b^tau, crp / abs_dp_b^tau)
+    ascvec <- c(1 / abs_b^tau, crm / abs_dm_b^tau, crp / abs_dp_b^tau)
   }
 
   # Precompute weight matrices and debiased covariance

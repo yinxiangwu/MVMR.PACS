@@ -17,7 +17,7 @@
 #' @param include_zero_group Logical. Whether to treat the non-causal group identified by MVMR-PACS from the selection dataset as a group for post-selection inference. Default = FALSE.
 #' @param lambda.1se Logical. Whether to use the one-standard-error rule when selecting tuning parameters. Default = TRUE.
 #' @param lambda.length Length of the candidate tuning parameter sequence for the PACS penalty. Default = 20.
-#' @param pleiotropy Logical. Whether to allow and select SNP-specific pleiotropic effects using an additional l1 penalty in the selection dataset. Default = FALSE.
+#' @param pleiotropy Logical. Whether to allow and select SNP-specific pleiotropic effects using an additional l1 penalty in the selection dataset. Default = TRUE.
 #' @param lambda.alpha Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.
 #' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.
 #' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.

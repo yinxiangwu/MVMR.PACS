@@ -108,6 +108,9 @@ obtain_initial <- function(
 
   # CV summary (guard against NA)
   col_means <- colMeans(obj_f_ridge, na.rm = TRUE)
+
+  if (all(!is.finite(col_means))) stop("All ridge CV fits failed.")
+
   col_se    <- apply(obj_f_ridge, 2, function(x) sd(x, na.rm = TRUE) / sqrt(CV_fold*n_times))
 
   # min + 1se rule
