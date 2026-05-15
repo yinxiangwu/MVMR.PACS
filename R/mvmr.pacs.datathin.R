@@ -41,7 +41,7 @@ mvmr.pacs.datathin <- function(
     type = 2, rr_cut_off = 0, tau = c(0.5, 1, 2, 3),
     fold = 5, over.dispersion = FALSE,
     re = 1, n_times = 1, epsilon = 1e-4, digit = 3,
-    include_zero_group = FALSE, lambda.1se = TRUE,
+    include_zero_group = FALSE, lambda.length = 20, lambda.1se = TRUE,
     pleiotropy = TRUE,
     lambda.alpha = NULL,
     lambda.alpha.length = 20,
