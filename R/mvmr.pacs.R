@@ -126,6 +126,7 @@ mvmr.pacs <- function(
 
   numCores <- parallel::detectCores() - 1
   cl <- parallel::makeCluster(numCores)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
   doParallel::registerDoParallel(cl)
 
   for (m in 1:n_times) {
