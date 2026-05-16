@@ -84,8 +84,6 @@ dIVW_PACS_cluster <- function(
   abs_dm_b <- pmax(as.vector(abs(dm %*% betawt)), littleeps)
   abs_dp_b <- pmax(as.vector(abs(dp %*% betawt)), littleeps)
 
-  RR <- pmin(pmax(RR, -1 + littleeps), 1 - littleeps)
-
   if (type == 1) {
     ascvec <- c(1 / abs_b^tau, 1 / abs_dm_b^tau, 1 / abs_dp_b^tau)
   } else if (type == 2) {
@@ -176,17 +174,11 @@ dIVW_PACS_cluster <- function(
       alphal_new <- rep(0, p)
     }
 
-    beta.diff <- max(abs((betal_new - old.beta) / (abs(old.beta) + littleeps)))
+    beta.diff <- max(abs(betal_new - old.beta)) / (max(abs(old.beta)) + littleeps)
     alpha.diff <- max(abs(alphal_new - old.alpha)) / (max(abs(old.alpha)) + littleeps)
 
     betal <- betal_new
     alphal <- alphal_new
-
-    if (!all(is.finite(c(betal_new, alphal_new, beta.diff, alpha.diff)))) {
-      betal <- rep(NA_real_, K)
-      alphal <- rep(NA_real_, p)
-      break
-    }
 
     if (max(beta.diff, alpha.diff) < err) {
       break
