@@ -339,16 +339,20 @@ mvmr.pacs <- function(
       )
 
       if (nrow(true_indices) > 0) {
-        lambda_values_ok <- lambda_cand[true_indices[, 1]]
+        lambda_alpha_values_ok <- lambda.alpha[true_indices[, 3]]
+
+        max_lambda_alpha <- max(lambda_alpha_values_ok, na.rm = TRUE)
+        keep1 <- true_indices[lambda_alpha_values_ok == max_lambda_alpha, , drop = FALSE]
+
+        lambda_values_ok <- lambda_cand[keep1[, 1]]
 
         max_lambda <- max(lambda_values_ok, na.rm = TRUE)
-        keep1 <- true_indices[lambda_values_ok == max_lambda, , drop = FALSE]
+        keep2 <- keep1[lambda_values_ok == max_lambda, , drop = FALSE]
 
-        max_lambda_alpha <- max(lambda.alpha[keep1[, 3]], na.rm = TRUE)
-        keep2 <- keep1[lambda.alpha[keep1[, 3]] == max_lambda_alpha, , drop = FALSE]
+        tau_values_ok <- tau[keep2[, 2]]
 
-        max_tau <- max(tau[keep2[, 2]], na.rm = TRUE)
-        keep3 <- keep2[tau[keep2[, 2]] == max_tau, , drop = FALSE]
+        max_tau <- max(tau_values_ok, na.rm = TRUE)
+        keep3 <- keep2[tau_values_ok == max_tau, , drop = FALSE]
 
         best_idx <- keep3[1, ]
       } else {
