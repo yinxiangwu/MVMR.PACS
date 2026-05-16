@@ -122,9 +122,14 @@ mvmr.pacs <- function(
     dim = c(n_times, CV_fold, length(lambda_cand), length(tau), length(lambda.alpha))
   )
 
-  numCores <- max(1L, parallel::detectCores(logical = FALSE) - 1L, na.rm = TRUE)
+  numCores <- parallel::detectCores() - 1
+  numCores <- max(1L, numCores)
+
   cl <- parallel::makeCluster(numCores)
-  on.exit(parallel::stopCluster(cl), add = TRUE)
+  on.exit({
+    try(parallel::stopCluster(cl), silent = TRUE)
+  }, add = TRUE)
+
   doParallel::registerDoParallel(cl)
 
   for (m in 1:n_times) {
