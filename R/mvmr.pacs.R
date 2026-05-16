@@ -278,8 +278,9 @@ mvmr.pacs <- function(
   valid_n <- apply(obj_f_pacs, c(3, 4, 5), function(x) sum(is.finite(x)))
 
   res_mean <- apply(obj_f_pacs, c(3, 4, 5), function(x) {
-    if (sum(is.finite(x)) == 0) return(NA_real_)
-    mean(x[is.finite(x)])
+    x <- x[is.finite(x)]
+    if (length(x) == 0) return(NA_real_)
+    mean(x)
   })
 
   res_sd <- apply(obj_f_pacs, c(3, 4, 5), function(x) {
@@ -288,25 +289,52 @@ mvmr.pacs <- function(
     stats::sd(x) / sqrt(length(x))
   })
 
-  # NEW: protect against all failed models
   if (all(!is.finite(res_mean))) {
     stop("All CV fits failed or diverged. Try increasing lambda.alpha.min.ratio or lambda.alpha.")
   }
 
-  best_idx <- which(res_mean == min(res_mean, na.rm = TRUE), arr.ind = TRUE)[1, ]
+  n_cv_total <- CV_fold * n_times
+  valid_full <- valid_n == n_cv_total & is.finite(res_mean)
+
+  if (!any(valid_full)) {
+    stop(
+      "No tuning parameter combination had fully valid CV fits across all ",
+      n_cv_total,
+      " data-thinning runs. Try increasing lambda.alpha.min.ratio, ",
+      "using a larger lambda.alpha grid, or checking convergence failures."
+    )
+  }
+
+  warning(
+    "Selecting tuning parameters only among combinations with fully valid CV fits across all ",
+    n_cv_total,
+    " data-thinning runs, so that the CV standard error for the minimizer is well defined."
+  )
+
+  res_mean_valid <- res_mean
+
+  res_mean_valid[!valid_full] <- Inf
+
+  best_idx <- which(
+    res_mean_valid == min(res_mean_valid, na.rm = TRUE),
+    arr.ind = TRUE
+  )[1, ]
 
   if (lambda.1se) {
     best_se <- res_sd[best_idx[1], best_idx[2], best_idx[3]]
 
     if (!is.finite(best_se)) {
-      warning("The selected model has fewer than two valid CV losses; using minimum-CV rule instead of 1SE rule.")
+      warning(
+        "The selected model does not have a finite CV standard error; ",
+        "using minimum-CV rule instead of 1SE rule."
+      )
     } else {
       cutoff <- res_mean[best_idx[1], best_idx[2], best_idx[3]] + best_se
 
       true_indices <- which(
         res_mean <= cutoff &
           is.finite(res_mean) &
-          valid_n >= 2,
+          valid_n == n_cv_total,
         arr.ind = TRUE
       )
 
@@ -324,7 +352,10 @@ mvmr.pacs <- function(
 
         best_idx <- keep3[1, ]
       } else {
-        warning("No candidate has at least two valid CV losses within 1SE; using minimum-CV rule instead.")
+        warning(
+          "No fully valid tuning parameter combination was within the 1SE cutoff; ",
+          "using minimum-CV rule instead."
+        )
       }
     }
   }
