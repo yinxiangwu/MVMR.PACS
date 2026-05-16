@@ -20,51 +20,70 @@ mvmr.pacs.datathin(
   epsilon = 1e-04,
   digit = 3,
   include_zero_group = FALSE,
-  lambda.1se = TRUE
+  lambda.length = 20,
+  lambda.1se = TRUE,
+  pleiotropy = TRUE,
+  lambda.alpha = NULL,
+  lambda.alpha.length = 20,
+  lambda.alpha.min.ratio = 0.05
 )
 }
 \arguments{
-\item{beta.exposure}{A data.frame or matrix. Each row contains the estimated marginal effect of a SNP on K exposures, usually obtained from a GWAS}
+\item{beta.exposure}{A data.frame or matrix. Each row contains the estimated marginal effects of a SNP on the K exposures, usually obtained from a GWAS.}
 
-\item{se.exposure}{A data.frame or matrix of estimated standard errors of beta.exposure}
+\item{se.exposure}{A data.frame or matrix of estimated standard errors corresponding to beta.exposure.}
 
-\item{beta.outcome}{A vector of the estimated marginal effect of a SNP on outcome, usually obtained from a GWAS}
+\item{beta.outcome}{A numeric vector of the estimated marginal effects of SNPs on the outcome, usually obtained from a GWAS.}
 
-\item{se.outcome}{A vector of estimated standard errors of beta.outcome}
+\item{se.outcome}{A numeric vector of estimated standard errors corresponding to beta.outcome.}
 
-\item{P}{A K-by-K matrix for the estimated shared correlation matrix between the effect of the genetic variants on each exposure, where K is the number of exposure.}
+\item{P}{A K-by-K matrix for the estimated shared correlation matrix among the SNP-exposure association estimates, where K is the number of exposures.}
 
-\item{type}{Weighting scheme in penalization: 1 = weights independent of correlation between beta.exposure; 2 = weights inversely related to correlation between beta.exposure; 3 = weights non-zero only if absolute correlation between beta.exposure greater than rr_cut_off; 4 = weights inversely related to correlation between beta.exposure only if absolute correlation between beta.exposure greater than rr_cut_off.}
+\item{type}{Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.}
 
-\item{rr_cut_off}{Pre-specified cut-off used in different weighting schemes, specified by type argument.}
+\item{rr_cut_off}{Pre-specified correlation cutoff used in the weighting schemes specified by type. Default = 0.}
 
-\item{tau}{Tuning parameter range. Default = c(0.5, 1, 2, 3).}
+\item{tau}{Numeric vector of candidate values for the adaptive weighting parameter. Default = c(0.5, 1, 2, 3).}
 
-\item{fold}{The number of folds for cross validation based on multifold data thinning. Default = 5.}
+\item{fold}{Number of folds used for cross-validation based on multi-fold data thinning within the selection dataset. Default = 5.}
 
-\item{over.dispersion}{Should SRIVW consider balanced horizontal pleiotropy when performing inference? Default is FALSE.}
+\item{over.dispersion}{Logical. Whether SRIVW should account for balanced horizontal pleiotropy when performing inference. Default = FALSE.}
 
-\item{re}{The number of repeated data thinning procedure. Default = 1. Increase this number of assess robustness of results.}
+\item{re}{Number of repeated two-fold data-thinning runs. Default = 1. Increase this value to assess robustness of selected signal-groups and post-selection inference.}
 
-\item{n_times}{The number of cross validation runs when selecting tuning parameters within the selection dataset. Default = 1.}
+\item{n_times}{Number of repeated cross-validation runs used when selecting tuning parameters within the selection dataset. Default = 1.}
 
-\item{epsilon}{Tolerance level for ADMM.proj. Default = 1e-4.}
+\item{epsilon}{Tolerance level for ADMM projection. Default = 1e-4.}
 
-\item{digit}{Number of digits to keep when determining signal-groups. Default = 3, i.e., decimal precision to 0.001.}
+\item{digit}{Number of digits to keep when determining signal-groups. Default = 3, corresponding to decimal precision 0.001.}
 
-\item{include_zero_group}{Whether or not consider non-causal-group identified by MVMR-PACS from the selection dataset as a group for post-selection inference. Default = FALSE.}
+\item{include_zero_group}{Logical. Whether to treat the non-causal group identified by MVMR-PACS from the selection dataset as a group for post-selection inference. Default = FALSE.}
 
-\item{lambda.1se}{Whether or not to perform 1SE rules when selecting tuning parameters. Default = TRUE.}
+\item{lambda.length}{Length of the candidate tuning parameter sequence for the PACS penalty. Default = 20.}
+
+\item{lambda.1se}{Logical. Whether to use the one-standard-error rule when selecting tuning parameters. Default = TRUE.}
+
+\item{pleiotropy}{Logical. Whether to allow and select SNP-specific pleiotropic effects using an additional l1 penalty in the selection dataset. Default = TRUE.}
+
+\item{lambda.alpha}{Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.}
+
+\item{lambda.alpha.length}{Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.}
+
+\item{lambda.alpha.min.ratio}{Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.}
 }
 \value{
-A list with elements
-\item{grouping.hist}{Identified signal-groups across repeated data thinning runs.}
-\item{beta.hist}{Matrix of estimated direct effect of each signal-group on the outcome from SRIVW across repeated data thinning runs.}
-\item{se.hist}{Matrix of estimated standard error of direct effect of each signal-group on the outcome from SRIVW across repeated data thinning runs.}
-\item{iv.hist.dt1}{Sample IV strength parameter in the selection dataset across repeated data thinning runs.}
-\item{iv.hist.dt1}{Sample IV strength parameter in the inferential dataset based on signal-groups across repeated data thinning runs.}
-\item{condF.dt1}{Conditional F-statistics in the selection dataset across repeated data thinning runs.}
-\item{condF.dt2}{Conditional F-statistics in the inferential dataset based on signal-groups across repeated data thinning runs.}
+A list with the following elements:
+\item{grouping.hist}{Identified signal-groups across repeated data-thinning runs.}
+\item{beta.hist}{Matrix of estimated direct effects of each signal-group on the outcome from SRIVW across repeated data-thinning runs.}
+\item{se.hist}{Matrix of estimated standard errors of direct effects of each signal-group on the outcome from SRIVW across repeated data-thinning runs.}
+\item{iv.hist.dt1}{Sample IV strength parameter in the selection dataset across repeated data-thinning runs, after excluding selected pleiotropic SNPs if pleiotropy = TRUE.}
+\item{iv.hist.dt2}{Sample IV strength parameter in the inferential dataset based on identified signal-groups across repeated data-thinning runs, after excluding selected pleiotropic SNPs if pleiotropy = TRUE.}
+\item{condF.dt1}{Conditional F-statistics in the selection dataset across repeated data-thinning runs, after excluding selected pleiotropic SNPs if pleiotropy = TRUE.}
+\item{condF.dt2}{Conditional F-statistics in the inferential dataset based on identified signal-groups across repeated data-thinning runs, after excluding selected pleiotropic SNPs if pleiotropy = TRUE.}
+\item{alpha.hist}{Matrix of estimated SNP-specific pleiotropic effects from the selection dataset across repeated data-thinning runs. If pleiotropy = FALSE, entries are zero.}
+\item{invalid.snp.hist}{A list containing indices of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
+\item{n.invalid.snp}{Number of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
+\item{pleiotropy}{Logical indicator of whether SNP-specific pleiotropic effects were modeled.}
 }
 \description{
 Function to perform MVMR-PACS estimator for signal-group identification and variable selection, along with two-fold data thinning for post-selection inference.

@@ -16,8 +16,6 @@
 #' @returns
 #' \item{betawt}{Estimated direct effects of each exposure on the outcome.}
 #' @export
-#'
-#' @examples
 obtain_initial <- function(
     beta.exposure,    # p x K
     se.exposure,      # p x K (SEs, >0)

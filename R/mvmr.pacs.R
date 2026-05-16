@@ -41,8 +41,6 @@
 #' \item{cv.loss.sd}{Array of estimated standard errors of the cross-validation losses.}
 #'
 #' @export
-#'
-#' @examples
 mvmr.pacs <- function(
     beta.exposure, se.exposure, beta.outcome, se.outcome, P,
     type = 2, rr_cut_off = 0, fix.cor = FALSE,

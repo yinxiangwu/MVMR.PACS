@@ -2,7 +2,7 @@
 % Please edit documentation in R/mvmr.pacs.R
 \name{mvmr.pacs}
 \alias{mvmr.pacs}
-\title{Function to perform MVMR-PACS estimator for signal-group identification and variable selection in two-sample multivariable Mendeliean randomization with highly-correlated exposures.}
+\title{Function to perform the MVMR-PACS estimator for signal-group identification and variable selection in two-sample multivariable Mendelian randomization with highly correlated exposures.}
 \usage{
 mvmr.pacs(
   beta.exposure,
@@ -21,55 +21,75 @@ mvmr.pacs(
   eps = 1e-04,
   digit = 3,
   seed = NULL,
-  lambda.1se = TRUE
+  lambda.1se = TRUE,
+  pleiotropy = TRUE,
+  lambda.alpha = NULL,
+  lambda.alpha.length = 20,
+  lambda.alpha.min.ratio = 0.05
 )
 }
 \arguments{
-\item{beta.exposure}{A data.frame or matrix. Each row contains the estimated marginal effect of a SNP on K exposures, usually obtained from a GWAS}
+\item{beta.exposure}{A data.frame or matrix. Each row contains the estimated marginal effects of a SNP on the K exposures, usually obtained from a GWAS.}
 
-\item{se.exposure}{A data.frame or matrix of estimated standard errors of beta.exposure}
+\item{se.exposure}{A data.frame or matrix of estimated standard errors corresponding to beta.exposure.}
 
-\item{beta.outcome}{A vector of the estimated marginal effect of a SNP on outcome, usually obtained from a GWAS}
+\item{beta.outcome}{A numeric vector of the estimated marginal effects of SNPs on the outcome, usually obtained from a GWAS.}
 
-\item{se.outcome}{A vector of estimated standard errors of beta.outcome}
+\item{se.outcome}{A numeric vector of estimated standard errors corresponding to beta.outcome.}
 
-\item{P}{A K-by-K matrix for the estimated shared correlation matrix between the effect of the genetic variants on each exposure, where K is the number of exposure.}
+\item{P}{A K-by-K matrix for the estimated shared correlation matrix among the SNP-exposure association estimates, where K is the number of exposures.}
 
-\item{type}{Weighting scheme in penalization: 1 = weights independent of correlation between beta.exposure; 2 = weights inversely related to correlation between beta.exposure; 3 = weights non-zero only if absolute correlation between beta.exposure greater than rr_cut_off; 4 = weights inversely related to correlation between beta.exposure only if absolute correlation between beta.exposure greater than rr_cut_off.}
+\item{type}{Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.}
 
-\item{rr_cut_off}{Pre-specified cut-off used in different weighting schemes, specified by type argument.}
+\item{rr_cut_off}{Pre-specified correlation cutoff used in the weighting schemes specified by type. Default = 0.}
 
-\item{fix.cor}{Whether or not recompute correlation of beta.exposure in cross validation. Default is FALSE.}
+\item{fix.cor}{Logical. Whether to use the full-data correlation matrix of beta.exposure in cross-validation instead of recomputing the correlation matrix within each training fold. Default = FALSE.}
 
-\item{betawt}{Initial beta coefficients. Default = NULL, meaning MVMR.dIVW with ridge penalty is used.}
+\item{betawt}{Numeric vector of initial beta coefficients. Default = NULL, in which case an initial estimator is obtained internally.}
 
-\item{tau}{Tuning parameter range. Default = c(0.5, 1, 2, 3).}
+\item{tau}{Numeric vector of candidate values for the adaptive weighting parameter. Default = c(0.5, 1, 2, 3).}
 
-\item{CV_fold}{The number of folds for cross validation based on multifold data thinning. Default = 5.}
+\item{CV_fold}{Number of folds for cross-validation based on multi-fold data thinning. Default = 5.}
 
-\item{n_times}{The number of repeated cross validation. Default = 1.}
+\item{n_times}{Number of repeated cross-validation runs. Default = 1.}
 
-\item{lambda.length}{Length of candidate penalization parameter. Default = 20.}
+\item{lambda.length}{Length of the candidate tuning parameter sequence for the PACS penalty. Default = 20.}
 
-\item{eps}{Tolerance level for ADMM.proj. Default = 1e-4.}
+\item{eps}{Tolerance level for ADMM projection. Default = 1e-4.}
 
-\item{digit}{Number of digits to keep when determining signal-groups. Default = 3, i.e., decimal precision to 0.001.}
+\item{digit}{Number of digits to keep when determining signal-groups. Default = 3, corresponding to decimal precision 0.001.}
 
 \item{seed}{Seed for reproducibility. Default = NULL.}
 
-\item{lambda.1se}{Whether or not to perform 1SE rules when selecting tuning parameters. Default = TRUE.}
+\item{lambda.1se}{Logical. Whether to use the one-standard-error rule when selecting tuning parameters. Default = TRUE.}
+
+\item{pleiotropy}{Logical. Whether to allow and select SNP-specific pleiotropic effects using an additional l1 penalty. Default = TRUE.}
+
+\item{lambda.alpha}{Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.}
+
+\item{lambda.alpha.length}{Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.}
+
+\item{lambda.alpha.min.ratio}{Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.}
 }
 \value{
-A list with elements
-\item{beta}{Estimated direct effects of each exposure on the outcome. Exposures with estimated effects of same magnitude (up to a prespecified decimal precision) belong to the same signal-group.}
-\item{signal_group}{Identified signal-groups}
-\item{iv_strength_parameter}{The minimum eigenvalue of the sample IV strength matrix, which quantifies the IV strength in the sample}
-\item{lambda.index}{Index for the best penalization parameter lambda}
-\item{lambda}{Value for the best penalization parameter lambda}
-\item{tau.index}{Index for the best penalization parameter tau}
-\item{tau}{Value for the best penalization parameter tau}
-\item{beta.init}{Initial beta estimates}
+A list with the following elements:
+\item{beta}{Estimated direct effects of each exposure on the outcome. Exposures with estimated effects of the same magnitude, up to the specified decimal precision, belong to the same signal-group.}
+\item{alpha}{Estimated SNP-specific pleiotropic effects. If pleiotropy = FALSE, this is a vector of zeros.}
+\item{invalid.snp}{Indices of SNPs with nonzero estimated pleiotropic effects.}
+\item{signal_group}{Identified signal-groups.}
+\item{iv_strength_parameter}{The minimum eigenvalue of the sample IV strength matrix, which quantifies instrument strength in the sample.}
+\item{lambda.index}{Index of the selected PACS penalty tuning parameter.}
+\item{lambda}{Selected PACS penalty tuning parameter.}
+\item{tau.index}{Index of the selected adaptive weighting parameter.}
+\item{tau}{Selected adaptive weighting parameter.}
+\item{lambda.alpha.index}{Index of the selected tuning parameter for the l1 penalty on SNP-specific pleiotropic effects.}
+\item{lambda.alpha}{Selected tuning parameter for the l1 penalty on SNP-specific pleiotropic effects.}
+\item{lambda.alpha.grid}{Candidate tuning parameter sequence used for the l1 penalty on SNP-specific pleiotropic effects.}
+\item{pleiotropy}{Logical indicator of whether pleiotropic effects were modeled.}
+\item{beta.init}{Initial beta estimates used to construct adaptive weights.}
+\item{cv.loss.mean}{Array of mean cross-validation losses over repeated data-thinning folds.}
+\item{cv.loss.sd}{Array of estimated standard errors of the cross-validation losses.}
 }
 \description{
-Function to perform MVMR-PACS estimator for signal-group identification and variable selection in two-sample multivariable Mendeliean randomization with highly-correlated exposures.
+Function to perform the MVMR-PACS estimator for signal-group identification and variable selection in two-sample multivariable Mendelian randomization with highly correlated exposures.
 }
