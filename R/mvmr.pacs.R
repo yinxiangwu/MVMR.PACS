@@ -73,17 +73,40 @@ mvmr.pacs <- function(
     gen_cor = P
   )$iv_strength_parameter
 
+  initial.fit <- NULL
   if (is.null(betawt)) {
-    betawt <- obtain_initial(
-      beta.exposure, se.exposure, beta.outcome, se.outcome,
-      iv_strength_parameter, P,
-      lambda.length = lambda.length,
-      seed = seed,
-      epsilon = eps,
-      CV_fold = CV_fold,
-      n_times = n_times,
-      lambda.1se = lambda.1se
-    )
+    if (pleiotropy) {
+      initial.fit <- obtain_initial_pleiotropy(
+        beta.exposure, se.exposure, beta.outcome, se.outcome,
+        iv_strength_parameter, P,
+        lambda.length = lambda.length,
+        seed = seed,
+        epsilon = eps,
+        CV_fold = CV_fold,
+        n_times = n_times,
+        lambda.1se = lambda.1se,
+        lambda.alpha = lambda.alpha,
+        lambda.alpha.length = lambda.alpha.length,
+        lambda.alpha.min.ratio = lambda.alpha.min.ratio
+      )
+    } else {
+      initial.fit <- obtain_initial(
+        beta.exposure, se.exposure, beta.outcome, se.outcome,
+        iv_strength_parameter, P,
+        lambda.length = lambda.length,
+        seed = seed,
+        epsilon = eps,
+        CV_fold = CV_fold,
+        n_times = n_times,
+        lambda.1se = lambda.1se
+      )
+    }
+    betawt <- initial.fit$beta
+  } else {
+    betawt <- as.numeric(betawt)
+    if (length(betawt) != K || any(!is.finite(betawt))) {
+      stop("betawt must be a finite numeric vector of length K.")
+    }
   }
 
   lambda_cand <- generate_tuning_para(
@@ -404,6 +427,12 @@ mvmr.pacs <- function(
 
   res$pleiotropy <- pleiotropy
   res$beta.init <- betawt
+  res$initial.fit <- initial.fit
+  res$initial.invalid.snp <- if (!is.null(initial.fit$invalid.snp)) {
+    initial.fit$invalid.snp
+  } else {
+    integer(0)
+  }
   res$cv.loss.mean <- res_mean
   res$cv.loss.sd <- res_sd
 

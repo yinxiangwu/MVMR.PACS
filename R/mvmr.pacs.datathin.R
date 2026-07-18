@@ -67,6 +67,7 @@ mvmr.pacs.datathin <- function(
   alpha_hist <- matrix(NA, nrow = re, ncol = p)       # NEW
   invalid.snp.hist <- vector("list", re)              # NEW
   n.invalid.snp <- rep(NA_integer_, re)               # NEW
+  initial.invalid.snp.hist <- vector("list", re)
 
   for (r in 1:re) {
 
@@ -105,13 +106,33 @@ mvmr.pacs.datathin <- function(
       gen_cor = P
     )$iv_strength_parameter
 
-    betawt <- obtain_initial(
-      beta.exposure.train, se.exposure.train,
-      beta.outcome.train, se.outcome.train,
-      iv_strength_parameter = iv_str_train,
-      n_times = 5, P = P,
-      lambda.1se = lambda.1se
-    )
+    if (pleiotropy) {
+      initial.fit <- obtain_initial_pleiotropy(
+        beta.exposure.train, se.exposure.train,
+        beta.outcome.train, se.outcome.train,
+        iv_strength_parameter = iv_str_train,
+        n_times = 5, P = P,
+        epsilon = epsilon,
+        lambda.length = lambda.length,
+        lambda.1se = lambda.1se,
+        lambda.alpha = lambda.alpha,
+        lambda.alpha.length = lambda.alpha.length,
+        lambda.alpha.min.ratio = lambda.alpha.min.ratio
+      )
+      initial.invalid.snp.hist[[r]] <- initial.fit$invalid.snp
+    } else {
+      initial.fit <- obtain_initial(
+        beta.exposure.train, se.exposure.train,
+        beta.outcome.train, se.outcome.train,
+        iv_strength_parameter = iv_str_train,
+        n_times = 5, P = P,
+        epsilon = epsilon,
+        lambda.length = lambda.length,
+        lambda.1se = lambda.1se
+      )
+      initial.invalid.snp.hist[[r]] <- integer(0)
+    }
+    betawt <- initial.fit$beta
 
     cat("Perform PACS on the training set to obtain grouping \n")
 
@@ -224,6 +245,7 @@ mvmr.pacs.datathin <- function(
   res$alpha.hist <- alpha_hist
   res$invalid.snp.hist <- invalid.snp.hist
   res$n.invalid.snp <- n.invalid.snp
+  res$initial.invalid.snp.hist <- initial.invalid.snp.hist
   res$pleiotropy <- pleiotropy
 
   return(res)
