@@ -111,7 +111,7 @@ mvmr.pacs.datathin <- function(
         beta.exposure.train, se.exposure.train,
         beta.outcome.train, se.outcome.train,
         iv_strength_parameter = iv_str_train,
-        n_times = 5, P = P,
+        n_times = n_times, P = P,
         epsilon = epsilon,
         lambda.length = lambda.length,
         lambda.1se = lambda.1se,
@@ -125,7 +125,7 @@ mvmr.pacs.datathin <- function(
         beta.exposure.train, se.exposure.train,
         beta.outcome.train, se.outcome.train,
         iv_strength_parameter = iv_str_train,
-        n_times = 5, P = P,
+        n_times = n_times, P = P,
         epsilon = epsilon,
         lambda.length = lambda.length,
         lambda.1se = lambda.1se
