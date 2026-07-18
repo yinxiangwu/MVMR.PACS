@@ -3,6 +3,7 @@
 export(mvmr.pacs)
 export(mvmr.pacs.datathin)
 export(obtain_initial)
+export(obtain_initial_pleiotropy)
 importFrom(Matrix,sparseMatrix)
 importFrom(datathin,datathin)
 importFrom(foreach,"%dopar%")

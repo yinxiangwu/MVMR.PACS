@@ -20,32 +20,33 @@ obtain_initial(
 )
 }
 \arguments{
-\item{beta.exposure}{A data.frame or matrix. Each row contains the estimated marginal effect of a SNP on K exposures, usually obtained from a GWAS}
+\item{beta.exposure}{A data.frame or matrix of SNP-exposure association estimates.}
 
-\item{se.exposure}{A data.frame or matrix of estimated standard errors of beta.exposure}
+\item{se.exposure}{A data.frame or matrix of standard errors for beta.exposure.}
 
-\item{beta.outcome}{A vector of the estimated marginal effect of a SNP on outcome, usually obtained from a GWAS}
+\item{beta.outcome}{A numeric vector of SNP-outcome association estimates.}
 
-\item{se.outcome}{A vector of estimated standard errors of beta.outcome}
+\item{se.outcome}{A numeric vector of standard errors for beta.outcome.}
 
-\item{iv_strength_parameter}{Sample IV strength parameter. Output from mvmr.srivw or mvmr.ivw estimators.}
+\item{iv_strength_parameter}{Sample IV strength parameter.}
 
-\item{P}{A K-by-K matrix for the estimated shared correlation matrix between the effect of the genetic variants on each exposure, where K is the number of exposure.}
+\item{P}{A K-by-K correlation matrix for SNP-exposure association estimates.}
 
-\item{CV_fold}{The number of folds for cross validation based on multifold data thinning. Default = 5.}
+\item{CV_fold}{Number of data-thinning cross-validation folds. Default = 5.}
 
-\item{n_times}{The number of repeated cross validation. Default = 1.}
+\item{n_times}{Number of repeated cross-validation runs. Default = 1.}
 
-\item{epsilon}{Tolerance level for ADMM.proj. Default = 1e-4.}
+\item{epsilon}{Tolerance for ADMM projection. Default = 1e-4.}
 
-\item{seed}{Seed for reproducibility. Default = NULL.}
+\item{seed}{Optional random seed.}
 
-\item{lambda.1se}{Whether or not to perform 1SE rules when selecting tuning parameters. Default = TRUE.}
+\item{lambda.1se}{Whether to use the one-standard-error rule. Default = TRUE.}
 
-\item{lambda.length}{Length of candidate penalization parameter. Default = 20.}
+\item{lambda.length}{Number of candidate ridge penalties. Default = 20.}
 }
 \value{
-\item{betawt}{Estimated direct effects of each exposure on the outcome.}
+A list with elements beta, phi, phi.index, phi.grid,
+cv.loss.mean, cv.loss.se, cv.valid.n, and cv.loss.
 }
 \description{
 Obtain initial beta coefficients using MVMR.dIVW with ridge penalty.
