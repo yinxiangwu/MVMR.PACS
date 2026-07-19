@@ -10,6 +10,7 @@ mvmr.pacs(
   beta.outcome,
   se.outcome,
   P,
+  overlap = FALSE,
   type = 2,
   rr_cut_off = 0,
   fix.cor = FALSE,
@@ -37,7 +38,9 @@ mvmr.pacs(
 
 \item{se.outcome}{A numeric vector of estimated standard errors corresponding to beta.outcome.}
 
-\item{P}{A K-by-K matrix for the estimated shared correlation matrix among the SNP-exposure association estimates, where K is the number of exposures.}
+\item{P}{A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.}
+
+\item{overlap}{Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.}
 
 \item{type}{Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.}
 

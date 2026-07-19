@@ -10,6 +10,7 @@ mvmr.pacs.datathin(
   beta.outcome,
   se.outcome,
   P,
+  overlap = FALSE,
   type = 2,
   rr_cut_off = 0,
   tau = c(0.5, 1, 2, 3),
@@ -37,7 +38,9 @@ mvmr.pacs.datathin(
 
 \item{se.outcome}{A numeric vector of estimated standard errors corresponding to beta.outcome.}
 
-\item{P}{A K-by-K matrix for the estimated shared correlation matrix among the SNP-exposure association estimates, where K is the number of exposures.}
+\item{P}{A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.}
+
+\item{overlap}{Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.}
 
 \item{type}{Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.}
 
@@ -47,7 +50,7 @@ mvmr.pacs.datathin(
 
 \item{fold}{Number of folds used for cross-validation based on multi-fold data thinning within the selection dataset. Default = 5.}
 
-\item{over.dispersion}{Logical. Whether SRIVW should account for balanced horizontal pleiotropy when performing inference. Default = FALSE.}
+\item{over.dispersion}{Logical. Whether SRIVW should account for balanced horizontal pleiotropy when performing inference. This must be FALSE when overlap = TRUE because the current overlap-adjusted SRIVW variance formula does not simultaneously model overdispersion. Default = FALSE.}
 
 \item{re}{Number of repeated two-fold data-thinning runs. Default = 1. Increase this value to assess robustness of selected signal-groups and post-selection inference.}
 

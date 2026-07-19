@@ -11,6 +11,7 @@ obtain_initial(
   se.outcome,
   iv_strength_parameter,
   P,
+  overlap = FALSE,
   CV_fold = 5,
   n_times = 1,
   epsilon = 1e-04,
@@ -30,7 +31,9 @@ obtain_initial(
 
 \item{iv_strength_parameter}{Sample IV strength parameter.}
 
-\item{P}{A K-by-K correlation matrix for SNP-exposure association estimates.}
+\item{P}{A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.}
+
+\item{overlap}{Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.}
 
 \item{CV_fold}{Number of data-thinning cross-validation folds. Default = 5.}
 
