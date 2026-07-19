@@ -5,7 +5,8 @@
 #' @param beta.outcome A numeric vector of SNP-outcome association estimates.
 #' @param se.outcome A numeric vector of standard errors for beta.outcome.
 #' @param iv_strength_parameter Sample IV strength parameter.
-#' @param P A K-by-K correlation matrix for SNP-exposure association estimates.
+#' @param P A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.
+#' @param overlap Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.
 #' @param CV_fold Number of data-thinning cross-validation folds. Default = 5.
 #' @param n_times Number of repeated cross-validation runs. Default = 1.
 #' @param epsilon Tolerance for ADMM projection. Default = 1e-4.
@@ -23,6 +24,7 @@ obtain_initial <- function(
     se.outcome,
     iv_strength_parameter,
     P,
+    overlap = FALSE,
     CV_fold = 5,
     n_times = 1,
     epsilon = 1e-4,
@@ -32,7 +34,7 @@ obtain_initial <- function(
 ) {
   dat <- validate_initial_inputs(
     beta.exposure, se.exposure, beta.outcome, se.outcome,
-    iv_strength_parameter, P, CV_fold, n_times, epsilon,
+    iv_strength_parameter, P, overlap, CV_fold, n_times, epsilon,
     lambda.length
   )
   beta.exposure <- dat$beta.exposure
@@ -40,6 +42,8 @@ obtain_initial <- function(
   beta.outcome <- dat$beta.outcome
   se.outcome <- dat$se.outcome
   P <- dat$P
+  P.exposure <- dat$P.exposure
+  rho.xy <- dat$rho.xy
   p <- dat$p
   K <- dat$K
 
@@ -54,17 +58,30 @@ obtain_initial <- function(
     NA_real_, nrow = CV_fold * n_times, ncol = length(phi_cand)
   )
 
-  Sig <- make_thinning_covariance(se.exposure, P)
+  if (isTRUE(overlap)) {
+    Sig.joint <- make_joint_thinning_covariance(se.exposure, se.outcome, P)
+    joint.summary <- cbind(beta.exposure, beta.outcome)
+  } else {
+    Sig <- make_thinning_covariance(se.exposure, P.exposure)
+  }
 
   for (m in seq_len(n_times)) {
     if (!is.null(seed)) set.seed(seed + m)
 
-    dt.exposure <- datathin::datathin(
-      beta.exposure, family = "mvnormal", arg = Sig, K = CV_fold
-    )
-    dt.outcome <- datathin::datathin(
-      beta.outcome, family = "normal", arg = se.outcome^2, K = CV_fold
-    )
+    if (isTRUE(overlap)) {
+      dt.joint <- datathin::datathin(
+        joint.summary, family = "mvnormal", arg = Sig.joint, K = CV_fold
+      )
+      dt.exposure <- dt.joint[, seq_len(K), , drop = FALSE]
+      dt.outcome <- dt.joint[, K + 1L, , drop = FALSE]
+    } else {
+      dt.exposure <- datathin::datathin(
+        beta.exposure, family = "mvnormal", arg = Sig, K = CV_fold
+      )
+      dt.outcome <- datathin::datathin(
+        beta.outcome, family = "normal", arg = se.outcome^2, K = CV_fold
+      )
+    }
 
     for (l in seq_len(CV_fold)) {
       train_idx <- setdiff(seq_len(CV_fold), l)
@@ -89,7 +106,7 @@ obtain_initial <- function(
           beta.exposure = X.train,
           se.exposure = seX.train,
           se.outcome = sey.train,
-          P = P,
+          P = P.exposure,
           epsilon = epsilon
         ),
         error = function(e) NULL
@@ -99,7 +116,7 @@ obtain_initial <- function(
           beta.exposure = X.test,
           se.exposure = seX.test,
           se.outcome = sey.test,
-          P = P,
+          P = P.exposure,
           epsilon = epsilon
         ),
         error = function(e) NULL
@@ -107,7 +124,9 @@ obtain_initial <- function(
 
       if (is.null(train_cache) || is.null(test_cache)) next
 
-      c.test <- as.numeric(test_cache$XtW %*% y.test)
+      B.test <- compute_overlap_bias(seX.test, sey.test, rho.xy)
+      B.train <- compute_overlap_bias(seX.train, sey.train, rho.xy)
+      c.test <- as.numeric(test_cache$XtW %*% y.test) - B.test
 
       for (jphi in seq_along(phi_cand)) {
         fit <- tryCatch({
@@ -116,7 +135,7 @@ obtain_initial <- function(
           )
           solve_mvmr_ridge_system(
             ridge_system,
-            as.numeric(train_cache$XtW %*% y.train)
+            as.numeric(train_cache$XtW %*% y.train) - B.train
           )
         }, error = function(e) NULL)
 
@@ -154,14 +173,15 @@ obtain_initial <- function(
   }
 
   final_cache <- prepare_mvmr_ridge_system(
-    beta.exposure, se.exposure, se.outcome, P, epsilon
+    beta.exposure, se.exposure, se.outcome, P.exposure, epsilon
   )
   final_system <- factorize_mvmr_ridge_system(
     final_cache$MV.plus, phi_cand[selected_idx]
   )
   beta_hat <- solve_mvmr_ridge_system(
     final_system,
-    as.numeric(final_cache$XtW %*% beta.outcome)
+    as.numeric(final_cache$XtW %*% beta.outcome) -
+      compute_overlap_bias(se.exposure, se.outcome, rho.xy)
   )
 
   list(
@@ -195,6 +215,7 @@ obtain_initial_pleiotropy <- function(
     se.outcome,
     iv_strength_parameter,
     P,
+    overlap = FALSE,
     CV_fold = 5,
     n_times = 1,
     epsilon = 1e-4,
@@ -209,7 +230,7 @@ obtain_initial_pleiotropy <- function(
 ) {
   dat <- validate_initial_inputs(
     beta.exposure, se.exposure, beta.outcome, se.outcome,
-    iv_strength_parameter, P, CV_fold, n_times, epsilon,
+    iv_strength_parameter, P, overlap, CV_fold, n_times, epsilon,
     lambda.length
   )
   beta.exposure <- dat$beta.exposure
@@ -217,6 +238,8 @@ obtain_initial_pleiotropy <- function(
   beta.outcome <- dat$beta.outcome
   se.outcome <- dat$se.outcome
   P <- dat$P
+  P.exposure <- dat$P.exposure
+  rho.xy <- dat$rho.xy
   p <- dat$p
 
   if (length(lambda.alpha.length) != 1L || !is.finite(lambda.alpha.length) ||
@@ -239,14 +262,15 @@ obtain_initial_pleiotropy <- function(
   phi_cand <- make_phi_grid(iv_strength_parameter, p, lambda.length)
 
   pilot_cache <- prepare_mvmr_ridge_system(
-    beta.exposure, se.exposure, se.outcome, P, epsilon
+    beta.exposure, se.exposure, se.outcome, P.exposure, epsilon
   )
   pilot_system <- factorize_mvmr_ridge_system(
     pilot_cache$MV.plus, max(phi_cand)
   )
   pilot_beta <- solve_mvmr_ridge_system(
     pilot_system,
-    as.numeric(pilot_cache$XtW %*% beta.outcome)
+    as.numeric(pilot_cache$XtW %*% beta.outcome) -
+      compute_overlap_bias(se.exposure, se.outcome, rho.xy)
   )
 
   if (is.null(lambda.alpha)) {
@@ -302,15 +326,17 @@ obtain_initial_pleiotropy <- function(
       sey.test <- se.outcome * sqrt(e)
 
       train_cache <- tryCatch(
-        prepare_mvmr_ridge_system(X.train, seX.train, sey.train, P, epsilon),
+        prepare_mvmr_ridge_system(X.train, seX.train, sey.train, P.exposure, epsilon),
         error = function(e) NULL
       )
       test_cache <- tryCatch(
-        prepare_mvmr_ridge_system(X.test, seX.test, sey.test, P, epsilon),
+        prepare_mvmr_ridge_system(X.test, seX.test, sey.test, P.exposure, epsilon),
         error = function(e) NULL
       )
       if (is.null(train_cache) || is.null(test_cache)) next
 
+      B.train <- compute_overlap_bias(seX.train, sey.train, rho.xy)
+      B.test <- compute_overlap_bias(seX.test, sey.test, rho.xy)
       wtest <- 1 / sey.test^2
 
       for (jphi in seq_along(phi_cand)) {
@@ -323,7 +349,7 @@ obtain_initial_pleiotropy <- function(
         beta.warm <- tryCatch(
           solve_mvmr_ridge_system(
             ridge_system,
-            as.numeric(train_cache$XtW %*% y.train)
+            as.numeric(train_cache$XtW %*% y.train) - B.train
           ),
           error = function(e) NULL
         )
@@ -342,7 +368,8 @@ obtain_initial_pleiotropy <- function(
               beta.init = beta.warm,
               alpha.init = alpha.warm,
               XtW = train_cache$XtW,
-              ridge.system = ridge_system
+              ridge.system = ridge_system,
+              overlap.bias = B.train
             ),
             error = function(e) NULL
           )
@@ -354,7 +381,7 @@ obtain_initial_pleiotropy <- function(
 
           alpha.test <- fit$alpha * e / (1 - e)
           y.adjusted <- y.test - alpha.test
-          c.test <- as.numeric(test_cache$XtW %*% y.adjusted)
+          c.test <- as.numeric(test_cache$XtW %*% y.adjusted) - B.test
           loss <- drop(crossprod(fit$beta, test_cache$MV.plus %*% fit$beta)) -
             2 * drop(crossprod(c.test, fit$beta)) +
             sum(wtest * y.adjusted^2)
@@ -399,14 +426,15 @@ obtain_initial_pleiotropy <- function(
   }
 
   final_cache <- prepare_mvmr_ridge_system(
-    beta.exposure, se.exposure, se.outcome, P, epsilon
+    beta.exposure, se.exposure, se.outcome, P.exposure, epsilon
   )
   final_system <- factorize_mvmr_ridge_system(
     final_cache$MV.plus, phi_cand[best_idx[1]]
   )
   final_beta_init <- solve_mvmr_ridge_system(
     final_system,
-    as.numeric(final_cache$XtW %*% beta.outcome)
+    as.numeric(final_cache$XtW %*% beta.outcome) -
+      compute_overlap_bias(se.exposure, se.outcome, rho.xy)
   )
   final_fit <- mvmr_ridge_pleiotropy(
     beta.exposure = beta.exposure,
@@ -418,7 +446,8 @@ obtain_initial_pleiotropy <- function(
     beta.init = final_beta_init,
     alpha.init = rep(0, p),
     XtW = final_cache$XtW,
-    ridge.system = final_system
+    ridge.system = final_system,
+    overlap.bias = compute_overlap_bias(se.exposure, se.outcome, rho.xy)
   )
 
   invalid.snp <- which(abs(final_fit$alpha) > 1e-7)
@@ -444,7 +473,7 @@ obtain_initial_pleiotropy <- function(
 
 validate_initial_inputs <- function(
     beta.exposure, se.exposure, beta.outcome, se.outcome,
-    iv_strength_parameter, P, CV_fold, n_times, epsilon,
+    iv_strength_parameter, P, overlap, CV_fold, n_times, epsilon,
     lambda.length
 ) {
   beta.exposure <- as.matrix(beta.exposure)
@@ -462,7 +491,7 @@ validate_initial_inputs <- function(
   if (length(beta.outcome) != p || length(se.outcome) != p) {
     stop("beta.outcome and se.outcome must have one value per SNP.")
   }
-  if (!identical(dim(P), c(K, K))) stop("P must be a K-by-K matrix.")
+  overlap.info <- parse_overlap_correlation(P, K, overlap)
   if (any(!is.finite(beta.exposure)) || any(!is.finite(se.exposure)) ||
       any(!is.finite(beta.outcome)) || any(!is.finite(se.outcome)) ||
       any(!is.finite(P))) {
@@ -501,6 +530,8 @@ validate_initial_inputs <- function(
     beta.outcome = beta.outcome,
     se.outcome = se.outcome,
     P = P,
+    P.exposure = overlap.info$P.exposure,
+    rho.xy = overlap.info$rho.xy,
     p = p,
     K = K
   )
@@ -598,17 +629,19 @@ mvmr_ridge_pleiotropy <- function(
     beta.init = NULL,
     alpha.init = NULL,
     XtW,
-    ridge.system
+    ridge.system,
+    overlap.bias = NULL
 ) {
   beta.exposure <- as.matrix(beta.exposure)
   beta.outcome <- as.numeric(beta.outcome)
   se.outcome <- as.numeric(se.outcome)
   p <- nrow(beta.exposure)
   K <- ncol(beta.exposure)
+  overlap.bias <- if (is.null(overlap.bias)) rep(0, K) else as.numeric(overlap.bias)
 
   beta.current <- if (is.null(beta.init)) {
     solve_mvmr_ridge_system(
-      ridge.system, as.numeric(XtW %*% beta.outcome)
+      ridge.system, as.numeric(XtW %*% beta.outcome) - overlap.bias
     )
   } else {
     as.numeric(beta.init)
@@ -622,7 +655,7 @@ mvmr_ridge_pleiotropy <- function(
   converged <- FALSE
   iter <- 0L
   for (iter in seq_len(max.iter)) {
-    rhs <- as.numeric(XtW %*% (beta.outcome - alpha.current))
+    rhs <- as.numeric(XtW %*% (beta.outcome - alpha.current)) - overlap.bias
     beta.new <- solve_mvmr_ridge_system(ridge.system, rhs)
 
     residual <- as.numeric(beta.outcome - beta.exposure %*% beta.new)

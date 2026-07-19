@@ -6,6 +6,47 @@
 #' @importFrom magrittr %>%
 NULL
 
+# Split the shared correlation matrix into the exposure block and the
+# exposure-outcome correlations. When overlap = FALSE, P is K-by-K.
+parse_overlap_correlation <- function(P, K, overlap = FALSE) {
+  P <- as.matrix(P)
+  expected <- if (isTRUE(overlap)) K + 1L else K
+  if (!identical(dim(P), c(expected, expected))) {
+    stop(
+      "P must be ", expected, "-by-", expected,
+      if (isTRUE(overlap)) " when overlap = TRUE." else " when overlap = FALSE."
+    )
+  }
+  if (any(!is.finite(P)) || !isTRUE(all.equal(P, t(P), tolerance = 1e-8))) {
+    stop("P must be a finite symmetric correlation matrix.")
+  }
+  if (min(eigen(P, symmetric = TRUE, only.values = TRUE)$values) < -1e-8) {
+    stop("P must be positive semidefinite.")
+  }
+  list(
+    P.exposure = P[seq_len(K), seq_len(K), drop = FALSE],
+    rho.xy = if (isTRUE(overlap)) P[seq_len(K), K + 1L] else rep(0, K)
+  )
+}
+
+compute_overlap_bias <- function(se.exposure, se.outcome, rho.xy) {
+  se.exposure <- as.matrix(se.exposure)
+  se.outcome <- as.numeric(se.outcome)
+  as.numeric(colSums(se.exposure * (rho.xy / se.outcome)))
+}
+
+make_joint_thinning_covariance <- function(se.exposure, se.outcome, P) {
+  se.exposure <- as.matrix(se.exposure)
+  se.outcome <- as.numeric(se.outcome)
+  p <- nrow(se.exposure)
+  K <- ncol(se.exposure)
+  Sig <- array(0, dim = c(p, K + 1L, K + 1L))
+  for (j in seq_len(p)) {
+    sj <- c(se.exposure[j, ], se.outcome[j])
+    Sig[j, , ] <- P * tcrossprod(sj)
+  }
+  Sig
+}
 
 
 #####################################################################
@@ -21,7 +62,8 @@ dIVW_PACS_cluster <- function(
     eps = 1e-4, max.iter = 1000, err = 1e-4,
     pleiotropy = FALSE,              # NEW
     lambda.alpha = NULL,             # NEW
-    alpha.init = NULL                 # NEW
+    alpha.init = NULL,                # NEW
+    overlap.bias = NULL
 ) {
   if (lambda <= 0) stop("lambda must be > 0.")
   if (rr < 0) stop("rr must be >= 0.")
@@ -42,6 +84,10 @@ dIVW_PACS_cluster <- function(
   # data preparation
   p <- length(beta.outcome)
   K <- ncol(beta.exposure)
+  overlap.bias <- if (is.null(overlap.bias)) rep(0, K) else as.numeric(overlap.bias)
+  if (length(overlap.bias) != K || any(!is.finite(overlap.bias))) {
+    stop("overlap.bias must be a finite numeric vector of length K.")
+  }
   littleeps <- 10^-7
 
   qp <- K * (K - 1) / 2
@@ -138,7 +184,8 @@ dIVW_PACS_cluster <- function(
 
     # beta update given alpha
     # NEW: replace beta.outcome by beta.outcome - alpha
-    XWy <- Matrix::crossprod(beta.exposure, W %*% (beta.outcome - alphal))
+    XWy <- Matrix::crossprod(beta.exposure, W %*% (beta.outcome - alphal)) -
+      overlap.bias
 
     D1 <- Matrix::Diagonal(x = ascvec[1:K] / (abs(old.beta) + littleeps))
     D2 <- Matrix::Diagonal(
@@ -196,6 +243,7 @@ dIVW_PACS_cluster <- function(
     lambda       = lambda,
     lambda.alpha = lambda.alpha,
     pleiotropy   = pleiotropy,
+    overlap.bias = overlap.bias,
     rr           = abs(rr),
     init         = betawt,
     alpha.init   = alpha.init,
@@ -206,92 +254,187 @@ dIVW_PACS_cluster <- function(
   )
 }
 
-SRIVW <- function (beta.exposure, se.exposure, beta.outcome, se.outcome, gen_cor = NULL, phi_cand = 0, over.dispersion = FALSE)
-{
-  if (ncol(beta.exposure) <= 1 | ncol(se.exposure) <= 1) {
-    stop("this function is developed for multivariable MR")
-  }
-  K <- ncol(beta.exposure)
-  if (nrow(beta.exposure) != length(beta.outcome)) {
-    stop("The number of SNPs in beta.exposure and beta.outcome is different")
-  }
+SRIVW <- function(
+    beta.exposure, se.exposure, beta.outcome, se.outcome,
+    gen_cor = NULL, phi_cand = 0,
+    over.dispersion = FALSE, overlap = FALSE
+) {
   beta.exposure <- as.matrix(beta.exposure)
   se.exposure <- as.matrix(se.exposure)
-  p <- nrow(beta.exposure)
-  W <- diag(se.outcome^(-2))
-  Vj <- lapply(1:p, function(j) diag(se.exposure[j, ]) %*%
-                 gen_cor[[j]] %*% diag(se.exposure[j, ]))
-  Vj_root_inv <- lapply(1:p, function(j) {
-    P_eigen <- eigen(gen_cor[[j]])
-    P_root_inv <- P_eigen$vectors %*% diag(1/sqrt(P_eigen$values)) %*%
-      t(P_eigen$vectors)
-    P_root_inv %*% diag(1/se.exposure[j, ])
-  })
-  IV_strength_matrix <- Reduce("+", lapply(1:p, function(j) {
-    beta.exposure.V <- Vj_root_inv[[j]] %*% beta.exposure[j, ]
-    beta.exposure.V %*% t(beta.exposure.V)
-  })) - p * diag(K)
-  iv_strength_parameter <- min(eigen(IV_strength_matrix/sqrt(p))$values)
-  V <- Reduce("+", lapply(1:p, function(j) {
-    Vj[[j]] * (se.outcome[j]^(-2))
-  }))
-  M <- t(beta.exposure) %*% W %*% beta.exposure
-  MV <- M - V
-  MV_eigvalues <- eigen(MV)$values
-  MV_eigen <- eigen(MV)
-  if (is.null(phi_cand)) {
-    phi_cand <- c(0, exp(seq(0, 17, by = 0.5) - min(iv_strength_parameter)))
-  }
-  phi_length <- length(phi_cand)
-  MV.l.inv.long <- Reduce(rbind, lapply(1:phi_length, function(l) {
-    MV_eigen$vectors %*% diag(1/(MV_eigvalues + phi_cand[l]/MV_eigvalues)) %*%
-      t(MV_eigen$vectors)
-  }))
-  beta.est <- MV.l.inv.long %*% t(beta.exposure) %*% W %*%
-    (beta.outcome)
-  prof.lik <- sapply(1:phi_length, function(l) {
-    beta.hat <- beta.est[(1 + (l - 1) * K):(l * K)]
-    bvb <- sapply(1:p, function(j) t(beta.hat) %*% Vj[[j]] %*%
-                    beta.hat)
-    tau2 <- 0
-    S <- diag(1/(se.outcome^2 + bvb + tau2))
-    1/p * t(beta.outcome - beta.exposure %*% beta.hat) %*%
-      S %*% (beta.outcome - beta.exposure %*% beta.hat)
-  })
-  phi_selected <- phi_cand[which.min(prof.lik)]
-  MV.l.inv <- MV_eigen$vectors %*% diag(1/(MV_eigvalues +
-                                             phi_selected/MV_eigvalues)) %*% t(MV_eigen$vectors)
-  mvmr.adIVW <- MV.l.inv %*% t(beta.exposure) %*% W %*%
-    beta.outcome
-  if (over.dispersion) {
-    tau2_adivw <- Reduce("+",lapply(1:p, function(j) {
-      v <- Vj[[j]] * (se.outcome[j]^(-2))
-      (beta.outcome[j] - beta.exposure[j,] %*% mvmr.adIVW)^2*se.outcome[j]^(-2) - 1 - as.numeric(t(mvmr.adIVW) %*% v %*% mvmr.adIVW)
-    }))/sum(diag(W))
-    tau2_adivw <- as.numeric(tau2_adivw)
-    if (tau2_adivw < 0) {
-      tau2_adivw <- 0
-      warning("Estimated overdispersion parameter < 0. Fixed at 0 instead.")
-    }
-  } else {
-    tau2_adivw <- 0
-  }
-  adIVW_Vt <- Reduce("+", lapply(1:p, function(j) {
-    m <- beta.exposure[j, ] %*% t(beta.exposure[j, ]) *
-      (se.outcome[j]^(-2))
-    v <- Vj[[j]] * (se.outcome[j]^(-2))
-    bvb <- as.numeric(t(mvmr.adIVW) %*% v %*% mvmr.adIVW)
-    vbbv <- v %*% mvmr.adIVW %*% t(mvmr.adIVW) %*% v
-    m * (1 + bvb + tau2_adivw * se.outcome[j]^(-2)) +
-      vbbv
-  }))
-  mvmr.adIVW.se <- sqrt(diag(MV.l.inv %*% adIVW_Vt %*%
-                               MV.l.inv))
-  return(list(beta.hat = as.vector(mvmr.adIVW), beta.se = as.vector(mvmr.adIVW.se),
-              iv_strength_parameter = iv_strength_parameter, phi_selected = phi_selected,
-              tau.square = tau2_adivw))
-}
+  beta.outcome <- as.numeric(beta.outcome)
+  se.outcome <- as.numeric(se.outcome)
 
+  K <- ncol(beta.exposure)
+  p <- nrow(beta.exposure)
+  if (K < 1L || ncol(se.exposure) != K) {
+    stop("beta.exposure and se.exposure must have the same positive number of columns.")
+  }
+  if (nrow(se.exposure) != p || length(beta.outcome) != p ||
+      length(se.outcome) != p) {
+    stop("Exposure and outcome inputs must contain the same number of SNPs.")
+  }
+  if (isTRUE(overlap) && isTRUE(over.dispersion)) {
+    stop(
+      "Simultaneous over.dispersion = TRUE and overlap = TRUE is not ",
+      "currently supported by the SRIVW variance formula."
+    )
+  }
+
+  if (is.null(gen_cor)) {
+    gen_cor <- replicate(
+      p, diag(if (isTRUE(overlap)) K + 1L else K), simplify = FALSE
+    )
+  } else if (is.matrix(gen_cor)) {
+    gen_cor <- replicate(p, as.matrix(gen_cor), simplify = FALSE)
+  }
+  if (!is.list(gen_cor) || length(gen_cor) != p) {
+    stop("gen_cor must be a correlation matrix or a list with one matrix per SNP.")
+  }
+
+  expected_dim <- if (isTRUE(overlap)) K + 1L else K
+  if (any(vapply(gen_cor, function(x) {
+    !identical(dim(as.matrix(x)), c(expected_dim, expected_dim))
+  }, logical(1)))) {
+    stop(
+      "Each gen_cor matrix must be ", expected_dim, "-by-", expected_dim,
+      if (isTRUE(overlap)) " when overlap = TRUE." else "."
+    )
+  }
+
+  W <- diag(se.outcome^(-2), p, p)
+  Sigma.joint <- lapply(seq_len(p), function(j) {
+    if (isTRUE(overlap)) {
+      sj <- c(se.exposure[j, ], se.outcome[j])
+    } else {
+      sj <- se.exposure[j, ]
+    }
+    diag(sj) %*% as.matrix(gen_cor[[j]]) %*% diag(sj)
+  })
+  Sigma.X <- lapply(Sigma.joint, function(x) x[seq_len(K), seq_len(K), drop = FALSE])
+
+  Vj_root_inv <- lapply(seq_len(p), function(j) {
+    P.X <- as.matrix(gen_cor[[j]])[seq_len(K), seq_len(K), drop = FALSE]
+    ee <- eigen(P.X, symmetric = TRUE)
+    if (min(ee$values) <= 0) stop("Exposure correlation matrix must be positive definite.")
+    P_root_inv <- ee$vectors %*% diag(1 / sqrt(ee$values), K) %*% t(ee$vectors)
+    P_root_inv %*% diag(1 / se.exposure[j, ], K)
+  })
+
+  IV_strength_matrix <- Reduce("+", lapply(seq_len(p), function(j) {
+    bx.std <- Vj_root_inv[[j]] %*% beta.exposure[j, ]
+    bx.std %*% t(bx.std)
+  })) - p * diag(K)
+  iv_strength_parameter <- min(
+    eigen(IV_strength_matrix / sqrt(p), symmetric = TRUE, only.values = TRUE)$values
+  )
+
+  V <- Reduce("+", lapply(seq_len(p), function(j) {
+    Sigma.X[[j]] * se.outcome[j]^(-2)
+  }))
+  M <- crossprod(beta.exposure, W %*% beta.exposure)
+  MV <- M - V
+  MV_eigen <- eigen(MV, symmetric = TRUE)
+  MV_eigvalues <- MV_eigen$values
+
+  if (is.null(phi_cand)) {
+    phi_cand <- c(0, exp(seq(0, 17, by = 0.5) - iv_strength_parameter))
+  }
+  phi_cand <- as.numeric(phi_cand)
+  phi_length <- length(phi_cand)
+
+  regularized_inverse <- function(phi) {
+    denom <- MV_eigvalues + phi / MV_eigvalues
+    MV_eigen$vectors %*% diag(1 / denom, K) %*% t(MV_eigen$vectors)
+  }
+  MV.l.inv.list <- lapply(phi_cand, regularized_inverse)
+
+  score <- as.numeric(crossprod(beta.exposure, W %*% beta.outcome))
+  if (isTRUE(overlap)) {
+    Adj_term <- Reduce("+", lapply(seq_len(p), function(j) {
+      Sigma.joint[[j]][seq_len(K), K + 1L, drop = FALSE] *
+        se.outcome[j]^(-2)
+    }))
+    score <- score - as.numeric(Adj_term)
+  }
+  beta.est <- lapply(MV.l.inv.list, function(Ainv) as.numeric(Ainv %*% score))
+
+  prof.lik <- vapply(beta.est, function(beta.hat) {
+    bvb <- vapply(seq_len(p), function(j) {
+      drop(t(beta.hat) %*% Sigma.X[[j]] %*% beta.hat)
+    }, numeric(1))
+    if (isTRUE(overlap)) {
+      bvxy <- vapply(seq_len(p), function(j) {
+        sigmaxy <- Sigma.joint[[j]][seq_len(K), K + 1L, drop = FALSE]
+        drop(t(beta.hat) %*% sigmaxy)
+      }, numeric(1))
+      residual_var <- se.outcome^2 + bvb - 2 * bvxy
+    } else {
+      residual_var <- se.outcome^2 + bvb
+    }
+    if (any(!is.finite(residual_var)) || any(residual_var <= 0)) return(Inf)
+    residual <- beta.outcome - as.numeric(beta.exposure %*% beta.hat)
+    mean(residual^2 / residual_var)
+  }, numeric(1))
+
+  selected_idx <- which.min(prof.lik)
+  phi_selected <- phi_cand[selected_idx]
+  MV.l.inv <- MV.l.inv.list[[selected_idx]]
+  mvmr.adIVW <- beta.est[[selected_idx]]
+
+  if (!isTRUE(overlap)) {
+    if (isTRUE(over.dispersion)) {
+      tau2_adivw <- Reduce("+", lapply(seq_len(p), function(j) {
+        v <- Sigma.X[[j]] * se.outcome[j]^(-2)
+        residual <- beta.outcome[j] - drop(beta.exposure[j, ] %*% mvmr.adIVW)
+        residual^2 * se.outcome[j]^(-2) - 1 -
+          drop(t(mvmr.adIVW) %*% v %*% mvmr.adIVW)
+      })) / sum(diag(W))
+      tau2_adivw <- max(as.numeric(tau2_adivw), 0)
+    } else {
+      tau2_adivw <- 0
+    }
+
+    adIVW_Vt <- Reduce("+", lapply(seq_len(p), function(j) {
+      bx <- matrix(beta.exposure[j, ], ncol = 1)
+      m <- bx %*% t(bx) * se.outcome[j]^(-2)
+      v <- Sigma.X[[j]] * se.outcome[j]^(-2)
+      bvb <- drop(t(mvmr.adIVW) %*% v %*% mvmr.adIVW)
+      vbbv <- v %*% mvmr.adIVW %*% t(mvmr.adIVW) %*% v
+      m * (1 + bvb + tau2_adivw * se.outcome[j]^(-2)) + vbbv
+    }))
+    meat <- adIVW_Vt
+  } else {
+    tau2_adivw <- NULL
+    meat <- Reduce("+", lapply(seq_len(p), function(j) {
+      bx <- matrix(beta.exposure[j, ], ncol = 1)
+      bhat <- matrix(mvmr.adIVW, ncol = 1)
+      m <- bx %*% t(bx) * se.outcome[j]^(-2)
+      v <- Sigma.X[[j]] * se.outcome[j]^(-2)
+      bvb <- drop(t(bhat) %*% v %*% bhat)
+      vbbv <- v %*% bhat %*% t(bhat) %*% v
+      sigmaxy <- Sigma.joint[[j]][seq_len(K), K + 1L, drop = FALSE]
+      sy4 <- se.outcome[j]^(-4)
+      A1 <- sigmaxy %*% t(sigmaxy) * sy4
+      A2 <- Sigma.X[[j]] %*% bhat %*% t(sigmaxy) * sy4
+      A3 <- sigmaxy %*% t(bhat) %*% Sigma.X[[j]] * sy4
+      beta_sigmaxy_w <- drop(t(bhat) %*% sigmaxy) * se.outcome[j]^(-2)
+      A4 <- beta_sigmaxy_w * m
+      A5 <- beta_sigmaxy_w * sigmaxy %*% t(sigmaxy) * sy4
+      m * (1 + bvb) + vbbv + A1 - A2 - A3 - 2 * A4 + 4 * A5
+    }))
+  }
+
+  covariance <- MV.l.inv %*% meat %*% MV.l.inv
+  beta.se <- sqrt(pmax(diag(covariance), 0))
+
+  list(
+    beta.hat = as.numeric(mvmr.adIVW),
+    beta.se = as.numeric(beta.se),
+    iv_strength_parameter = iv_strength_parameter,
+    phi_selected = phi_selected,
+    tau.square = tau2_adivw
+  )
+}
 
 groupAssignment <- function(beta, digit = 3) {
   beta <- round(beta, digit)
@@ -387,66 +530,120 @@ computeGroupedSE <- function(se.exposure, P, G) {
               Corr_group = Corr_group))
 }
 
-computeGroupedData <- function(beta.exposure, se.exposure, P, G) {
-  beta.exposure <- beta.exposure %*% t(G)
-  out <- computeGroupedSE(se.exposure,P,G)
-  se.exposure <- out$se_grouped
-  P_grouped <- out$Corr_group
-  return(list(beta.exposure = beta.exposure,
-              se.exposure = se.exposure,
-              P_grouped = P_grouped))
-}
-
-SRIVW_group_est <- function(beta.exposure,se.exposure,beta.outcome,se.outcome,P,est_beta,include_zero_group = FALSE, digit = 3, over.dispersion = FALSE) {
+computeGroupedData <- function(
+    beta.exposure, se.exposure, se.outcome, P, G, overlap = FALSE
+) {
+  beta.exposure <- as.matrix(beta.exposure)
+  se.exposure <- as.matrix(se.exposure)
+  se.outcome <- as.numeric(se.outcome)
   K <- ncol(beta.exposure)
   p <- nrow(beta.exposure)
-  # construct transformation matrix for beta-exposure associations
-  group <- groupAssignment(est_beta, digit = digit)
-  G_collapse <- constructG(x = group, y = sign(round(est_beta,digit)), include_zero_group = include_zero_group)
-  L <- nrow(G_collapse)
-  stopifnot(L>0)
 
-  # Use another data to do inference
-  group_dat <- computeGroupedData(beta.exposure,se.exposure,P,G = G_collapse)
+  overlap.info <- parse_overlap_correlation(P, K, overlap)
+  P.exposure <- overlap.info$P.exposure
+  beta.grouped <- beta.exposure %*% t(G)
+  out <- computeGroupedSE(se.exposure, P.exposure, G)
 
-  if (L == 1) {
-    final_fit <- mr.divw::mr.divw(beta.exposure = group_dat$beta.exposure,beta.outcome = beta.outcome,
-                         se.exposure = group_dat$se.exposure,se.outcome = se.outcome, over.dispersion = over.dispersion)
-    beta_est <- final_fit$beta.hat %*% G_collapse
-    beta_se <- final_fit$beta.se %*% G_collapse
-    iv.strength.dt <- final_fit$condition
+  if (isTRUE(overlap)) {
+    joint_cor <- vector("list", p)
+    for (j in seq_len(p)) {
+      Sigma.X <- diag(se.exposure[j, ], K) %*% P.exposure %*%
+        diag(se.exposure[j, ], K)
+      Sigma.XY <- se.exposure[j, ] * se.outcome[j] * overlap.info$rho.xy
+      Sigma.joint <- rbind(
+        cbind(Sigma.X, Sigma.XY),
+        c(Sigma.XY, se.outcome[j]^2)
+      )
+      T.group <- matrix(0, nrow = nrow(G) + 1L, ncol = K + 1L)
+      T.group[seq_len(nrow(G)), seq_len(K)] <- G
+      T.group[nrow(G) + 1L, K + 1L] <- 1
+      Sigma.group <- T.group %*% Sigma.joint %*% t(T.group)
+      sd.group <- sqrt(diag(Sigma.group))
+      joint_cor[[j]] <- Sigma.group / tcrossprod(sd.group)
+    }
+    P.grouped <- joint_cor
   } else {
-    final_fit <- SRIVW(beta.exposure = group_dat$beta.exposure, beta.outcome = beta.outcome,
-                       se.exposure = group_dat$se.exposure, se.outcome = se.outcome,
-                       phi_cand = NULL, gen_cor = group_dat$P_grouped, over.dispersion = over.dispersion)
-    beta_est <- final_fit$beta.hat %*% G_collapse
-    beta_se <- abs(final_fit$beta.se %*% G_collapse)
-    iv.strength.dt <- final_fit$iv_strength_parameter
+    P.grouped <- out$Corr_group
   }
 
-  # calculate minimum conditional F-stats
-  if (L > 1) {
-    F.data <- MVMR::format_mvmr(BXGs = group_dat$beta.exposure,
-                          BYG = beta.outcome,
-                          seBXGs = group_dat$se.exposure,
-                          seBYG = se.outcome,
-                          RSID = 1:p)
+  list(
+    beta.exposure = beta.grouped,
+    se.exposure = out$se_grouped,
+    P_grouped = P.grouped
+  )
+}
 
-    invisible(capture.output(fres <- MVMR::strength_mvmr(r_input = F.data, gencov = lapply(1:p, function(j)
-    {diag(group_dat$se.exposure[j,]) %*% group_dat$P_grouped[[j]] %*% diag(group_dat$se.exposure[j,])}))
+SRIVW_group_est <- function(
+    beta.exposure, se.exposure, beta.outcome, se.outcome, P, est_beta,
+    include_zero_group = FALSE, digit = 3,
+    over.dispersion = FALSE, overlap = FALSE
+) {
+  K <- ncol(beta.exposure)
+  p <- nrow(beta.exposure)
+  group <- groupAssignment(est_beta, digit = digit)
+  G_collapse <- constructG(
+    x = group,
+    y = sign(round(est_beta, digit)),
+    include_zero_group = include_zero_group
+  )
+  L <- nrow(G_collapse)
+  if (L < 1L) stop("No signal group is available for SRIVW inference.")
+
+  group_dat <- computeGroupedData(
+    beta.exposure = beta.exposure,
+    se.exposure = se.exposure,
+    se.outcome = se.outcome,
+    P = P,
+    G = G_collapse,
+    overlap = overlap
+  )
+
+  final_fit <- SRIVW(
+    beta.exposure = group_dat$beta.exposure,
+    se.exposure = group_dat$se.exposure,
+    beta.outcome = beta.outcome,
+    se.outcome = se.outcome,
+    phi_cand = if (L == 1L) 0 else NULL,
+    gen_cor = group_dat$P_grouped,
+    over.dispersion = over.dispersion,
+    overlap = overlap
+  )
+  beta_est <- as.numeric(final_fit$beta.hat %*% G_collapse)
+  beta_se <- abs(as.numeric(final_fit$beta.se %*% G_collapse))
+  iv.strength.dt <- final_fit$iv_strength_parameter
+
+  if (L > 1L) {
+    P.exposure.grouped <- lapply(group_dat$P_grouped, function(x) {
+      as.matrix(x)[seq_len(L), seq_len(L), drop = FALSE]
+    })
+    F.data <- MVMR::format_mvmr(
+      BXGs = group_dat$beta.exposure,
+      BYG = beta.outcome,
+      seBXGs = group_dat$se.exposure,
+      seBYG = se.outcome,
+      RSID = seq_len(p)
+    )
+    invisible(capture.output(
+      fres <- MVMR::strength_mvmr(
+        r_input = F.data,
+        gencov = lapply(seq_len(p), function(j) {
+          diag(group_dat$se.exposure[j, ], L) %*%
+            P.exposure.grouped[[j]] %*%
+            diag(group_dat$se.exposure[j, ], L)
+        })
+      )
     ))
-
     condF <- abs(as.numeric(fres) %*% G_collapse)
   } else {
-    condF <- NA
+    condF <- rep(NA_real_, K)
   }
 
-  res <- NULL
-  res$beta_est <- beta_est
-  res$beta_se <- abs(beta_se)
-  res$iv_strength <- iv.strength.dt
-  res$condF <- condF
-  return(res)
+  list(
+    beta_est = beta_est,
+    beta_se = beta_se,
+    iv_strength = iv.strength.dt,
+    condF = condF
+  )
 }
 
 generate_tuning_para <- function(beta.exposure, se.exposure, se.outcome, K, P, lambda.length) {

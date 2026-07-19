@@ -4,7 +4,8 @@
 #' @param se.exposure A data.frame or matrix of estimated standard errors corresponding to beta.exposure.
 #' @param beta.outcome A numeric vector of the estimated marginal effects of SNPs on the outcome, usually obtained from a GWAS.
 #' @param se.outcome A numeric vector of estimated standard errors corresponding to beta.outcome.
-#' @param P A K-by-K matrix for the estimated shared correlation matrix among the SNP-exposure association estimates, where K is the number of exposures.
+#' @param P A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.
+#' @param overlap Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.
 #' @param type Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.
 #' @param rr_cut_off Pre-specified correlation cutoff used in the weighting schemes specified by type. Default = 0.
 #' @param fix.cor Logical. Whether to use the full-data correlation matrix of beta.exposure in cross-validation instead of recomputing the correlation matrix within each training fold. Default = FALSE.
@@ -43,6 +44,7 @@
 #' @export
 mvmr.pacs <- function(
     beta.exposure, se.exposure, beta.outcome, se.outcome, P,
+    overlap = FALSE,
     type = 2, rr_cut_off = 0, fix.cor = FALSE,
     betawt = NULL, tau = c(0.5, 1, 2, 3),
     CV_fold = 5, n_times = 1, lambda.length = 20,
@@ -64,13 +66,16 @@ mvmr.pacs <- function(
 
   p <- nrow(beta.exposure)
   K <- ncol(beta.exposure)
+  overlap.info <- parse_overlap_correlation(P, K, overlap)
+  P.exposure <- overlap.info$P.exposure
+  rho.xy <- overlap.info$rho.xy
 
   iv_strength_parameter <- mr.divw::mvmr.ivw(
     beta.exposure = beta.exposure,
     se.exposure = se.exposure,
     beta.outcome = beta.outcome,
     se.outcome = se.outcome,
-    gen_cor = P
+    gen_cor = P.exposure
   )$iv_strength_parameter
 
   initial.fit <- NULL
@@ -79,6 +84,7 @@ mvmr.pacs <- function(
       initial.fit <- obtain_initial_pleiotropy(
         beta.exposure, se.exposure, beta.outcome, se.outcome,
         iv_strength_parameter, P,
+        overlap = overlap,
         lambda.length = lambda.length,
         seed = seed,
         epsilon = eps,
@@ -93,6 +99,7 @@ mvmr.pacs <- function(
       initial.fit <- obtain_initial(
         beta.exposure, se.exposure, beta.outcome, se.outcome,
         iv_strength_parameter, P,
+        overlap = overlap,
         lambda.length = lambda.length,
         seed = seed,
         epsilon = eps,
@@ -110,7 +117,7 @@ mvmr.pacs <- function(
   }
 
   lambda_cand <- generate_tuning_para(
-    beta.exposure, se.exposure, se.outcome, K, P,
+    beta.exposure, se.exposure, se.outcome, K, P.exposure,
     lambda.length = lambda.length
   )
 
@@ -154,19 +161,29 @@ mvmr.pacs <- function(
   for (m in 1:n_times) {
     cat("CV times = ", m, "\n")
 
-    Sig <- array(0, dim = c(p, K, K))
-    for (j in 1:p) {
-      Sig[j, , ] <- diag(se.exposure[j, ]) %*% P %*% diag(se.exposure[j, ])
+    if (isTRUE(overlap)) {
+      Sig.joint <- make_joint_thinning_covariance(se.exposure, se.outcome, P)
+      joint.summary <- cbind(beta.exposure, beta.outcome)
+    } else {
+      Sig <- make_thinning_covariance(se.exposure, P.exposure)
     }
 
     if (!is.null(seed)) set.seed(seed + m)
 
-    dt.exposure <- datathin::datathin(
-      beta.exposure, family = "mvnormal", arg = Sig, K = CV_fold
-    )
-    dt.outcome <- datathin::datathin(
-      beta.outcome, family = "normal", arg = se.outcome^2, K = CV_fold
-    )
+    if (isTRUE(overlap)) {
+      dt.joint <- datathin::datathin(
+        joint.summary, family = "mvnormal", arg = Sig.joint, K = CV_fold
+      )
+      dt.exposure <- dt.joint[, seq_len(K), , drop = FALSE]
+      dt.outcome <- dt.joint[, K + 1L, , drop = FALSE]
+    } else {
+      dt.exposure <- datathin::datathin(
+        beta.exposure, family = "mvnormal", arg = Sig, K = CV_fold
+      )
+      dt.outcome <- datathin::datathin(
+        beta.outcome, family = "normal", arg = se.outcome^2, K = CV_fold
+      )
+    }
 
     cv_results <- foreach::foreach(
       l = 1:CV_fold,
@@ -195,7 +212,7 @@ mvmr.pacs <- function(
       se.outcome.test <- se.outcome * sqrt(e)
 
       V.test <- Reduce("+", lapply(1:nrow(beta.exposure.test), function(j) {
-        diag(se.exposure.test[j, ]) %*% P %*% diag(se.exposure.test[j, ]) *
+        diag(se.exposure.test[j, ]) %*% P.exposure %*% diag(se.exposure.test[j, ]) *
           se.outcome.test[j]^(-2)
       }))
 
@@ -222,7 +239,7 @@ mvmr.pacs <- function(
             se.exposure = se.exposure.train,
             beta.outcome = beta.outcome.train,
             se.outcome = se.outcome.train,
-            P = P,
+            P = P.exposure,
             RR = rr.train,
             type = type,
             rr = rr_cut_off,
@@ -232,7 +249,10 @@ mvmr.pacs <- function(
             tau = tau_val,
             digit = digit,
             pleiotropy = pleiotropy,
-            lambda.alpha = lambda_alpha_val
+            lambda.alpha = lambda_alpha_val,
+            overlap.bias = compute_overlap_bias(
+              se.exposure.train, se.outcome.train, rho.xy
+            )
           )
         }, error = function(e) {
           NULL
@@ -275,7 +295,8 @@ mvmr.pacs <- function(
 
         y_alpha_test <- beta.outcome.test - alpha_hat_test
 
-        XW_y <- t(beta.exposure.test) %*% (W.test %*% y_alpha_test)
+        XW_y <- t(beta.exposure.test) %*% (W.test %*% y_alpha_test) -
+          compute_overlap_bias(se.exposure.test, se.outcome.test, rho.xy)
 
         loss <- t(beta_hat) %*% (MV_plus.test %*% beta_hat) -
           2 * crossprod(XW_y, beta_hat) +
@@ -392,7 +413,7 @@ mvmr.pacs <- function(
     se.exposure = se.exposure,
     beta.outcome = beta.outcome,
     se.outcome = se.outcome,
-    P = P,
+    P = P.exposure,
     RR = RR_obs,
     type = type,
     rr = rr_cut_off,
@@ -402,7 +423,8 @@ mvmr.pacs <- function(
     eps = eps,
     digit = digit,
     pleiotropy = pleiotropy,
-    lambda.alpha = lambda.alpha[best_idx[3]]
+    lambda.alpha = lambda.alpha[best_idx[3]],
+    overlap.bias = compute_overlap_bias(se.exposure, se.outcome, rho.xy)
   )
 
   beta.pacs <- pacs.model$coefficients
@@ -426,6 +448,7 @@ mvmr.pacs <- function(
   res$lambda.alpha.grid <- lambda.alpha
 
   res$pleiotropy <- pleiotropy
+  res$overlap <- overlap
   res$beta.init <- betawt
   res$initial.fit <- initial.fit
   res$initial.invalid.snp <- if (!is.null(initial.fit$invalid.snp)) {

@@ -4,12 +4,13 @@
 #' @param se.exposure A data.frame or matrix of estimated standard errors corresponding to beta.exposure.
 #' @param beta.outcome A numeric vector of the estimated marginal effects of SNPs on the outcome, usually obtained from a GWAS.
 #' @param se.outcome A numeric vector of estimated standard errors corresponding to beta.outcome.
-#' @param P A K-by-K matrix for the estimated shared correlation matrix among the SNP-exposure association estimates, where K is the number of exposures.
+#' @param P A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.
+#' @param overlap Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.
 #' @param type Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.
 #' @param rr_cut_off Pre-specified correlation cutoff used in the weighting schemes specified by type. Default = 0.
 #' @param tau Numeric vector of candidate values for the adaptive weighting parameter. Default = c(0.5, 1, 2, 3).
 #' @param fold Number of folds used for cross-validation based on multi-fold data thinning within the selection dataset. Default = 5.
-#' @param over.dispersion Logical. Whether SRIVW should account for balanced horizontal pleiotropy when performing inference. Default = FALSE.
+#' @param over.dispersion Logical. Whether SRIVW should account for balanced horizontal pleiotropy when performing inference. This must be FALSE when overlap = TRUE because the current overlap-adjusted SRIVW variance formula does not simultaneously model overdispersion. Default = FALSE.
 #' @param re Number of repeated two-fold data-thinning runs. Default = 1. Increase this value to assess robustness of selected signal-groups and post-selection inference.
 #' @param n_times Number of repeated cross-validation runs used when selecting tuning parameters within the selection dataset. Default = 1.
 #' @param epsilon Tolerance level for ADMM projection. Default = 1e-4.
@@ -38,6 +39,7 @@
 #' @export
 mvmr.pacs.datathin <- function(
     beta.exposure, se.exposure, beta.outcome, se.outcome, P,
+    overlap = FALSE,
     type = 2, rr_cut_off = 0, tau = c(0.5, 1, 2, 3),
     fold = 5, over.dispersion = FALSE,
     re = 1, n_times = 1, epsilon = 1e-4, digit = 3,
@@ -52,6 +54,14 @@ mvmr.pacs.datathin <- function(
 
   p <- nrow(beta.exposure)
   K <- ncol(beta.exposure)
+  overlap.info <- parse_overlap_correlation(P, K, overlap)
+  P.exposure <- overlap.info$P.exposure
+  if (isTRUE(overlap) && isTRUE(over.dispersion)) {
+    stop(
+      "Simultaneous overlap = TRUE and over.dispersion = TRUE is not ",
+      "currently supported by the SRIVW variance formula."
+    )
+  }
 
   grouping_hist <- rep(NA, re)
 
@@ -73,18 +83,23 @@ mvmr.pacs.datathin <- function(
 
     cat("start analysis run:", r, "\n")
 
-    Sig <- array(0, dim = c(p, K, K))
-    for (j in 1:p) {
-      Sig[j, , ] <- diag(se.exposure[j, ]) %*% P %*% diag(se.exposure[j, ])
+    if (isTRUE(overlap)) {
+      Sig.joint <- make_joint_thinning_covariance(se.exposure, se.outcome, P)
+      dt.joint <- datathin::datathin(
+        cbind(beta.exposure, beta.outcome),
+        family = "mvnormal", arg = Sig.joint, K = 2
+      )
+      dt.exposure <- dt.joint[, seq_len(K), , drop = FALSE]
+      dt.outcome <- dt.joint[, K + 1L, , drop = FALSE]
+    } else {
+      Sig <- make_thinning_covariance(se.exposure, P.exposure)
+      dt.exposure <- datathin::datathin(
+        beta.exposure, family = "mvnormal", arg = Sig, K = 2
+      )
+      dt.outcome <- datathin::datathin(
+        beta.outcome, family = "normal", arg = se.outcome^2, K = 2
+      )
     }
-
-    dt.exposure <- datathin::datathin(
-      beta.exposure, family = "mvnormal", arg = Sig, K = 2
-    )
-
-    dt.outcome <- datathin::datathin(
-      beta.outcome, family = "normal", arg = se.outcome^2, K = 2
-    )
 
     beta.exposure.train <- apply(dt.exposure[, , -2], c(1, 2), sum)
     se.exposure.train   <- se.exposure * sqrt(1 - e1)
@@ -103,7 +118,7 @@ mvmr.pacs.datathin <- function(
       se.exposure = se.exposure.train,
       beta.outcome = beta.outcome.train,
       se.outcome = se.outcome.train,
-      gen_cor = P
+      gen_cor = P.exposure
     )$iv_strength_parameter
 
     if (pleiotropy) {
@@ -112,6 +127,7 @@ mvmr.pacs.datathin <- function(
         beta.outcome.train, se.outcome.train,
         iv_strength_parameter = iv_str_train,
         n_times = n_times, P = P,
+        overlap = overlap,
         epsilon = epsilon,
         lambda.length = lambda.length,
         lambda.1se = lambda.1se,
@@ -126,6 +142,7 @@ mvmr.pacs.datathin <- function(
         beta.outcome.train, se.outcome.train,
         iv_strength_parameter = iv_str_train,
         n_times = n_times, P = P,
+        overlap = overlap,
         epsilon = epsilon,
         lambda.length = lambda.length,
         lambda.1se = lambda.1se
@@ -142,6 +159,7 @@ mvmr.pacs.datathin <- function(
       beta.outcome = beta.outcome.train,
       se.outcome = se.outcome.train,
       P = P,
+      overlap = overlap,
       type = type,
       rr_cut_off = rr_cut_off,
       betawt = betawt,
@@ -206,7 +224,8 @@ mvmr.pacs.datathin <- function(
       est_beta = pacs_res$beta,
       digit = digit,
       include_zero_group = include_zero_group,
-      over.dispersion = over.dispersion
+      over.dispersion = over.dispersion,
+      overlap = overlap
     )
 
     iv.hist.dt1[r] <- res_dt1$iv_strength
@@ -223,7 +242,8 @@ mvmr.pacs.datathin <- function(
       est_beta = pacs_res$beta,
       digit = digit,
       include_zero_group = include_zero_group,
-      over.dispersion = over.dispersion
+      over.dispersion = over.dispersion,
+      overlap = overlap
     )
 
     beta_est[r, ] <- res_dt2$beta_est
@@ -247,6 +267,7 @@ mvmr.pacs.datathin <- function(
   res$n.invalid.snp <- n.invalid.snp
   res$initial.invalid.snp.hist <- initial.invalid.snp.hist
   res$pleiotropy <- pleiotropy
+  res$overlap <- overlap
 
   return(res)
 }
