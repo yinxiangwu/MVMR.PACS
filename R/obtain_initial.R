@@ -241,6 +241,7 @@ obtain_initial_pleiotropy <- function(
   P.exposure <- dat$P.exposure
   rho.xy <- dat$rho.xy
   p <- dat$p
+  K <- dat$K
 
   if (length(lambda.alpha.length) != 1L || !is.finite(lambda.alpha.length) ||
       lambda.alpha.length < 1L) {
@@ -291,7 +292,15 @@ obtain_initial_pleiotropy <- function(
     }
   }
 
-  Sig <- make_thinning_covariance(se.exposure, P)
+  if (isTRUE(overlap)) {
+    Sig.joint <- make_joint_thinning_covariance(
+      se.exposure, se.outcome, P
+    )
+    joint.summary <- cbind(beta.exposure, beta.outcome)
+  } else {
+    Sig <- make_thinning_covariance(se.exposure, P.exposure)
+  }
+
   cv_loss <- array(
     NA_real_,
     dim = c(CV_fold * n_times, length(phi_cand), length(lambda.alpha))
@@ -300,12 +309,29 @@ obtain_initial_pleiotropy <- function(
   for (m in seq_len(n_times)) {
     if (!is.null(seed)) set.seed(seed + m)
 
-    dt.exposure <- datathin::datathin(
-      beta.exposure, family = "mvnormal", arg = Sig, K = CV_fold
-    )
-    dt.outcome <- datathin::datathin(
-      beta.outcome, family = "normal", arg = se.outcome^2, K = CV_fold
-    )
+    if (isTRUE(overlap)) {
+      dt.joint <- datathin::datathin(
+        joint.summary,
+        family = "mvnormal",
+        arg = Sig.joint,
+        K = CV_fold
+      )
+      dt.exposure <- dt.joint[, seq_len(K), , drop = FALSE]
+      dt.outcome <- dt.joint[, K + 1L, , drop = FALSE]
+    } else {
+      dt.exposure <- datathin::datathin(
+        beta.exposure,
+        family = "mvnormal",
+        arg = Sig,
+        K = CV_fold
+      )
+      dt.outcome <- datathin::datathin(
+        beta.outcome,
+        family = "normal",
+        arg = se.outcome^2,
+        K = CV_fold
+      )
+    }
 
     for (l in seq_len(CV_fold)) {
       train_idx <- setdiff(seq_len(CV_fold), l)
