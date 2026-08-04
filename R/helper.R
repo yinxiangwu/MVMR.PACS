@@ -497,11 +497,13 @@ constructG <- function(x, y, include_zero_group = FALSE) {
   # 4. optionally append the "zero-sign" group as row L+1
   if (include_zero_group) {
     zero_idx <- which(y == 0)
-    zero_row <- integer(K)
-    zero_row[zero_idx] <- 1L
-    G <- rbind(G, zero_row)
-    # give it a name so you can see it’s the zero-group
-    rownames(G)[nrow(G)] <- "zero_signs"
+
+    # Append the zero-effect group only when it is nonempty
+    if (length(zero_idx) > 0L) {
+      zero_row <- integer(K)
+      zero_row[zero_idx] <- 1L
+      G <- rbind(G, zero_signs = zero_row)
+    }
   }
 
   return(G)
