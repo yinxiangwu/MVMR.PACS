@@ -26,7 +26,9 @@ mvmr.pacs.datathin(
   pleiotropy = TRUE,
   lambda.alpha = NULL,
   lambda.alpha.length = 20,
-  lambda.alpha.min.ratio = 0.05
+  lambda.alpha.min.ratio = 0.05,
+  lambda.alpha.max.multiplier = 4,
+  max.pleiotropy.prop = 0.1
 )
 }
 \arguments{
@@ -73,6 +75,10 @@ mvmr.pacs.datathin(
 \item{lambda.alpha.length}{Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.}
 
 \item{lambda.alpha.min.ratio}{Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.}
+
+\item{lambda.alpha.max.multiplier}{Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.}
+
+\item{max.pleiotropy.prop}{Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.}
 }
 \value{
 A list with the following elements:

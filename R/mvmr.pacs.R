@@ -22,6 +22,8 @@
 #' @param lambda.alpha Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.
 #' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.
 #' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.
+#' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
+#' @param max.pleiotropy.prop Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.
 #'
 #' @return A list with the following elements:
 #' \item{beta}{Estimated direct effects of each exposure on the outcome. Exposures with estimated effects of the same magnitude, up to the specified decimal precision, belong to the same signal-group.}
@@ -52,7 +54,9 @@ mvmr.pacs <- function(
     pleiotropy = TRUE,                   # NEW
     lambda.alpha = NULL,                 # NEW
     lambda.alpha.length = 20,            # NEW
-    lambda.alpha.min.ratio = 0.05        # NEW
+    lambda.alpha.min.ratio = 0.05,       # NEW
+    lambda.alpha.max.multiplier = 4,     # NEW
+    max.pleiotropy.prop = 0.10           # NEW
 ) {
 
   e <- 1 / CV_fold
@@ -61,6 +65,19 @@ mvmr.pacs <- function(
   se.exposure <- as.matrix(se.exposure)
   beta.outcome <- as.numeric(beta.outcome)
   se.outcome <- as.numeric(se.outcome)
+
+  if (pleiotropy) {
+    if (length(lambda.alpha.max.multiplier) != 1L ||
+        !is.finite(lambda.alpha.max.multiplier) ||
+        lambda.alpha.max.multiplier < 1) {
+      stop("lambda.alpha.max.multiplier must be at least 1.")
+    }
+    if (length(max.pleiotropy.prop) != 1L ||
+        !is.finite(max.pleiotropy.prop) ||
+        max.pleiotropy.prop <= 0 || max.pleiotropy.prop >= 1) {
+      stop("max.pleiotropy.prop must be in (0, 1).")
+    }
+  }
 
   RR_obs <- stats::cor(beta.exposure)
 
@@ -93,7 +110,9 @@ mvmr.pacs <- function(
         lambda.1se = lambda.1se,
         lambda.alpha = lambda.alpha,
         lambda.alpha.length = lambda.alpha.length,
-        lambda.alpha.min.ratio = lambda.alpha.min.ratio
+        lambda.alpha.min.ratio = lambda.alpha.min.ratio,
+        lambda.alpha.max.multiplier = lambda.alpha.max.multiplier,
+        max.pleiotropy.prop = max.pleiotropy.prop
       )
     } else {
       initial.fit <- obtain_initial(
@@ -132,7 +151,11 @@ mvmr.pacs <- function(
       }
 
       lambda.alpha <- lambda.alpha.max *
-        exp(seq(log(1), log(lambda.alpha.min.ratio), length.out = lambda.alpha.length))
+        exp(seq(
+          log(lambda.alpha.max.multiplier),
+          log(lambda.alpha.min.ratio),
+          length.out = lambda.alpha.length
+        ))
     } else {
       lambda.alpha <- sort(unique(lambda.alpha), decreasing = TRUE)
     }
@@ -148,6 +171,10 @@ mvmr.pacs <- function(
   )
 
   obj_f_pacs <- array(
+    NA_real_,
+    dim = c(n_times, CV_fold, length(lambda_cand), length(tau), length(lambda.alpha))
+  )
+  prop_alpha_pacs <- array(
     NA_real_,
     dim = c(n_times, CV_fold, length(lambda_cand), length(tau), length(lambda.alpha))
   )
@@ -227,6 +254,10 @@ mvmr.pacs <- function(
         NA_real_,
         dim = c(length(lambda_cand), length(tau), length(lambda.alpha))
       )
+      prop_alpha_array <- array(
+        NA_real_,
+        dim = c(length(lambda_cand), length(tau), length(lambda.alpha))
+      )
 
       for (i in 1:nrow(grid)) {
         lambda_val <- grid[i, "lambda"]
@@ -284,6 +315,10 @@ mvmr.pacs <- function(
             next
           }
 
+          prop_alpha_array[
+            lambda_idx, tau_idx, lambda_alpha_idx
+          ] <- mean(abs(alpha_hat_train) > 1e-7)
+
           # Data thinning scales the mean signal.
           # Training alpha estimates correspond to (1-e) * alpha_j.
           # Test fold has mean e * alpha_j.
@@ -291,6 +326,9 @@ mvmr.pacs <- function(
 
         } else {
           alpha_hat_test <- rep(0, p)
+          prop_alpha_array[
+            lambda_idx, tau_idx, lambda_alpha_idx
+          ] <- 0
         }
 
         y_alpha_test <- beta.outcome.test - alpha_hat_test
@@ -309,11 +347,12 @@ mvmr.pacs <- function(
         losses_array[lambda_idx, tau_idx, lambda_alpha_idx] <- as.numeric(loss)
       }
 
-      losses_array
+      list(loss = losses_array, prop_alpha = prop_alpha_array)
     }
 
     for (l in 1:CV_fold) {
-      obj_f_pacs[m, l, , , ] <- cv_results[[l]]
+      obj_f_pacs[m, l, , , ] <- cv_results[[l]]$loss
+      prop_alpha_pacs[m, l, , , ] <- cv_results[[l]]$prop_alpha
     }
   }
 
@@ -331,6 +370,18 @@ mvmr.pacs <- function(
     x <- x[is.finite(x)]
     if (length(x) <= 1) return(Inf)
     stats::sd(x) / sqrt(length(x))
+  })
+
+  prop_alpha_mean <- apply(prop_alpha_pacs, c(3, 4, 5), function(x) {
+    x <- x[is.finite(x)]
+    if (length(x) == 0L) return(NA_real_)
+    mean(x)
+  })
+
+  prop_alpha_max <- apply(prop_alpha_pacs, c(3, 4, 5), function(x) {
+    x <- x[is.finite(x)]
+    if (length(x) == 0L) return(NA_real_)
+    max(x)
   })
 
   if (all(!is.finite(res_mean))) {
@@ -356,73 +407,105 @@ mvmr.pacs <- function(
   )
 
   res_mean_valid <- res_mean
-
   res_mean_valid[!valid_full] <- Inf
 
-  best_idx <- which(
+  unconstrained_idx <- which(
     res_mean_valid == min(res_mean_valid, na.rm = TRUE),
     arr.ind = TRUE
   )[1, ]
+  best_idx <- unconstrained_idx
+  sparse_pleiotropy_supported <- !pleiotropy
 
-  if (lambda.1se) {
-    best_se <- res_sd[best_idx[1], best_idx[2], best_idx[3]]
+  if (pleiotropy) {
+    if (lambda.1se) {
+      best_se <- res_sd[
+        unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+      ]
 
-    if (!is.finite(best_se)) {
-      warning(
-        "The selected model does not have a finite CV standard error; ",
-        "using minimum-CV rule instead of 1SE rule."
-      )
+      if (!is.finite(best_se)) {
+        warning(
+          "The unconstrained minimum-CV model does not have a finite CV ",
+          "standard error; the sparsity constraint was not used to move ",
+          "outside the minimum-CV model."
+        )
+        sparse_pleiotropy_supported <-
+          is.finite(prop_alpha_mean[
+            unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+          ]) &&
+          prop_alpha_mean[
+            unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+          ] <= max.pleiotropy.prop
+      } else {
+        cutoff <- res_mean[
+          unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+        ] + best_se
+
+        eligible <- which(
+          res_mean <= cutoff &
+            is.finite(res_mean) &
+            valid_n == n_cv_total &
+            is.finite(prop_alpha_mean) &
+            prop_alpha_mean <= max.pleiotropy.prop,
+          arr.ind = TRUE
+        )
+
+        if (nrow(eligible) > 0L) {
+          sparse_pleiotropy_supported <- TRUE
+
+          # Preserve the current PACS 1SE tie-breaking order.
+          lambda_values_ok <- lambda_cand[eligible[, 1]]
+          max_lambda <- max(lambda_values_ok, na.rm = TRUE)
+          keep1 <- eligible[lambda_values_ok == max_lambda, , drop = FALSE]
+
+          tau_values_ok <- tau[keep1[, 2]]
+          max_tau <- max(tau_values_ok, na.rm = TRUE)
+          keep2 <- keep1[tau_values_ok == max_tau, , drop = FALSE]
+
+          lambda_alpha_values_ok <- lambda.alpha[keep2[, 3]]
+          max_lambda_alpha <- max(lambda_alpha_values_ok, na.rm = TRUE)
+          keep3 <- keep2[
+            lambda_alpha_values_ok == max_lambda_alpha, , drop = FALSE
+          ]
+
+          best_idx <- keep3[1, ]
+        } else {
+          warning(
+            "No MVMR-PACS tuning combination is both within the 1SE ",
+            "region and below max.pleiotropy.prop = ", max.pleiotropy.prop,
+            ". Returning the unconstrained minimum-CV model and setting ",
+            "sparse_pleiotropy_supported = FALSE."
+          )
+        }
+      }
     } else {
-      cutoff <- res_mean[best_idx[1], best_idx[2], best_idx[3]] + best_se
-
-      true_indices <- which(
-        res_mean <= cutoff &
-          is.finite(res_mean) &
-          valid_n == n_cv_total,
+      sparse_pleiotropy_supported <-
+        is.finite(prop_alpha_mean[
+          unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+        ]) &&
+        prop_alpha_mean[
+          unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+        ] <= max.pleiotropy.prop
+    }
+  } else if (lambda.1se) {
+    best_se <- res_sd[
+      unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+    ]
+    if (is.finite(best_se)) {
+      cutoff <- res_mean[
+        unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+      ] + best_se
+      eligible <- which(
+        res_mean <= cutoff & is.finite(res_mean) & valid_n == n_cv_total,
         arr.ind = TRUE
       )
-
-      if (nrow(true_indices) > 0) {
-
-        # 1. First prioritize stronger PACS shrinkage for beta
-        lambda_values_ok <- lambda_cand[true_indices[, 1]]
-
+      if (nrow(eligible) > 0L) {
+        lambda_values_ok <- lambda_cand[eligible[, 1]]
         max_lambda <- max(lambda_values_ok, na.rm = TRUE)
-
-        keep1 <- true_indices[
-          lambda_values_ok == max_lambda,
-          ,
-          drop = FALSE
-        ]
-
-        # 2. Then prioritize larger tau
+        keep1 <- eligible[lambda_values_ok == max_lambda, , drop = FALSE]
         tau_values_ok <- tau[keep1[, 2]]
-
         max_tau <- max(tau_values_ok, na.rm = TRUE)
-
-        keep2 <- keep1[
-          tau_values_ok == max_tau,
-          ,
-          drop = FALSE
-        ]
-
-        # 3. Finally prefer larger lambda.alpha
-        lambda_alpha_values_ok <- lambda.alpha[keep2[, 3]]
-
-        max_lambda_alpha <- max(lambda_alpha_values_ok, na.rm = TRUE)
-
-        keep3 <- keep2[
-          lambda_alpha_values_ok == max_lambda_alpha,
-          ,
-          drop = FALSE
-        ]
-
-        best_idx <- keep3[1, ]
-      } else {
-        warning(
-          "No fully valid tuning parameter combination was within the 1SE cutoff; ",
-          "using minimum-CV rule instead."
-        )
+        keep2 <- keep1[tau_values_ok == max_tau, , drop = FALSE]
+        best_idx <- keep2[1, ]
       }
     }
   }
@@ -465,6 +548,25 @@ mvmr.pacs <- function(
   res$lambda.alpha.index <- best_idx[3]
   res$lambda.alpha <- lambda.alpha[best_idx[3]]
   res$lambda.alpha.grid <- lambda.alpha
+
+  res$max.pleiotropy.prop <- max.pleiotropy.prop
+  res$cv.pleiotropy.prop.mean <- prop_alpha_mean
+  res$cv.pleiotropy.prop.max <- prop_alpha_max
+  res$selected.cv.pleiotropy.prop <- prop_alpha_mean[
+    best_idx[1], best_idx[2], best_idx[3]
+  ]
+  res$final.pleiotropy.prop <- if (pleiotropy) {
+    mean(abs(pacs.model$alpha) > 1e-7)
+  } else {
+    0
+  }
+  res$sparse_pleiotropy_supported <- sparse_pleiotropy_supported
+  res$unconstrained.lambda <- lambda_cand[unconstrained_idx[1]]
+  res$unconstrained.tau <- tau[unconstrained_idx[2]]
+  res$unconstrained.lambda.alpha <- lambda.alpha[unconstrained_idx[3]]
+  res$unconstrained.cv.pleiotropy.prop <- prop_alpha_mean[
+    unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+  ]
 
   res$pleiotropy <- pleiotropy
   res$overlap <- overlap

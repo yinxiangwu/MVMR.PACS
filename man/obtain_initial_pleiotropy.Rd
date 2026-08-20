@@ -21,6 +21,8 @@ obtain_initial_pleiotropy(
   lambda.alpha = NULL,
   lambda.alpha.length = 20,
   lambda.alpha.min.ratio = 0.05,
+  lambda.alpha.max.multiplier = 4,
+  max.pleiotropy.prop = 0.1,
   max.iter = 200,
   err = 1e-04
 )
@@ -57,6 +59,10 @@ obtain_initial_pleiotropy(
 \item{lambda.alpha.length}{Length of the lambda.alpha grid. Default = 20.}
 
 \item{lambda.alpha.min.ratio}{Smallest-to-largest lambda.alpha ratio.}
+
+\item{lambda.alpha.max.multiplier}{Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.}
+
+\item{max.pleiotropy.prop}{Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.}
 
 \item{max.iter}{Maximum alternating updates. Default = 200.}
 

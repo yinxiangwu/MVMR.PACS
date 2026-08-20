@@ -202,6 +202,8 @@ obtain_initial <- function(
 #' @param lambda.alpha Optional candidate penalties for SNP-specific pleiotropy.
 #' @param lambda.alpha.length Length of the lambda.alpha grid. Default = 20.
 #' @param lambda.alpha.min.ratio Smallest-to-largest lambda.alpha ratio.
+#' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
+#' @param max.pleiotropy.prop Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.
 #' @param max.iter Maximum alternating updates. Default = 200.
 #' @param err Joint absolute-relative convergence tolerance. Default = 1e-4.
 #'
@@ -225,6 +227,8 @@ obtain_initial_pleiotropy <- function(
     lambda.alpha = NULL,
     lambda.alpha.length = 20,
     lambda.alpha.min.ratio = 0.05,
+    lambda.alpha.max.multiplier = 4,
+    max.pleiotropy.prop = 0.10,
     max.iter = 200,
     err = 1e-4
 ) {
@@ -251,6 +255,16 @@ obtain_initial_pleiotropy <- function(
       !is.finite(lambda.alpha.min.ratio) ||
       lambda.alpha.min.ratio <= 0 || lambda.alpha.min.ratio > 1) {
     stop("lambda.alpha.min.ratio must be in (0, 1].")
+  }
+  if (length(lambda.alpha.max.multiplier) != 1L ||
+      !is.finite(lambda.alpha.max.multiplier) ||
+      lambda.alpha.max.multiplier < 1) {
+    stop("lambda.alpha.max.multiplier must be at least 1.")
+  }
+  if (length(max.pleiotropy.prop) != 1L ||
+      !is.finite(max.pleiotropy.prop) ||
+      max.pleiotropy.prop <= 0 || max.pleiotropy.prop >= 1) {
+    stop("max.pleiotropy.prop must be in (0, 1).")
   }
   if (length(max.iter) != 1L || !is.finite(max.iter) || max.iter < 1L) {
     stop("max.iter must be a positive integer.")
@@ -281,7 +295,7 @@ obtain_initial_pleiotropy <- function(
       stop("Cannot construct a valid lambda.alpha grid.")
     }
     lambda.alpha <- lambda.alpha.max * exp(seq(
-      log(1), log(lambda.alpha.min.ratio),
+      log(lambda.alpha.max.multiplier), log(lambda.alpha.min.ratio),
       length.out = as.integer(lambda.alpha.length)
     ))
   } else {
@@ -302,6 +316,10 @@ obtain_initial_pleiotropy <- function(
   }
 
   cv_loss <- array(
+    NA_real_,
+    dim = c(CV_fold * n_times, length(phi_cand), length(lambda.alpha))
+  )
+  cv_pleiotropy_prop <- array(
     NA_real_,
     dim = c(CV_fold * n_times, length(phi_cand), length(lambda.alpha))
   )
@@ -405,6 +423,9 @@ obtain_initial_pleiotropy <- function(
           beta.warm <- fit$beta
           alpha.warm <- fit$alpha
 
+          cv_pleiotropy_prop[row_id, jphi, ja] <-
+            mean(abs(fit$alpha) > 1e-7)
+
           alpha.test <- fit$alpha * e / (1 - e)
           y.adjusted <- y.test - alpha.test
           c.test <- as.numeric(test_cache$XtW %*% y.adjusted) - B.test
@@ -425,20 +446,40 @@ obtain_initial_pleiotropy <- function(
     stop("No pleiotropy-aware tuning combination had valid fits across all CV folds.")
   }
 
+  pleiotropy_prop_mean <- apply(
+    cv_pleiotropy_prop, c(2, 3), function(x) {
+      x <- x[is.finite(x)]
+      if (length(x) == 0L) NA_real_ else mean(x)
+    }
+  )
+  pleiotropy_prop_max <- apply(
+    cv_pleiotropy_prop, c(2, 3), function(x) {
+      x <- x[is.finite(x)]
+      if (length(x) == 0L) NA_real_ else max(x)
+    }
+  )
+
   loss_valid <- cv_summary$mean
   loss_valid[!valid_full] <- Inf
-  best_idx <- which(loss_valid == min(loss_valid), arr.ind = TRUE)[1, ]
+  unconstrained_idx <- which(
+    loss_valid == min(loss_valid), arr.ind = TRUE
+  )[1, ]
+  best_idx <- unconstrained_idx
+  sparse_pleiotropy_supported <- FALSE
 
   if (isTRUE(lambda.1se) &&
-      is.finite(cv_summary$se[best_idx[1], best_idx[2]])) {
-    cutoff <- cv_summary$mean[best_idx[1], best_idx[2]] +
-      cv_summary$se[best_idx[1], best_idx[2]]
+      is.finite(cv_summary$se[unconstrained_idx[1], unconstrained_idx[2]])) {
+    cutoff <- cv_summary$mean[unconstrained_idx[1], unconstrained_idx[2]] +
+      cv_summary$se[unconstrained_idx[1], unconstrained_idx[2]]
     eligible <- which(
       valid_full & is.finite(cv_summary$mean) &
-        cv_summary$mean <= cutoff,
+        cv_summary$mean <= cutoff &
+        is.finite(pleiotropy_prop_mean) &
+        pleiotropy_prop_mean <= max.pleiotropy.prop,
       arr.ind = TRUE
     )
     if (nrow(eligible) > 0L) {
+      sparse_pleiotropy_supported <- TRUE
       max_alpha <- max(lambda.alpha[eligible[, 2]])
       eligible <- eligible[
         lambda.alpha[eligible[, 2]] == max_alpha, , drop = FALSE
@@ -448,6 +489,25 @@ obtain_initial_pleiotropy <- function(
         phi_cand[eligible[, 1]] == max_phi, , drop = FALSE
       ]
       best_idx <- eligible[1, ]
+    } else {
+      warning(
+        "No initial-estimator tuning combination is both within the 1SE ",
+        "region and below max.pleiotropy.prop = ", max.pleiotropy.prop,
+        ". Returning the unconstrained minimum-CV initial estimator and ",
+        "setting sparse_pleiotropy_supported = FALSE."
+      )
+    }
+  } else {
+    sparse_pleiotropy_supported <-
+      is.finite(pleiotropy_prop_mean[unconstrained_idx[1], unconstrained_idx[2]]) &&
+      pleiotropy_prop_mean[unconstrained_idx[1], unconstrained_idx[2]] <=
+      max.pleiotropy.prop
+    if (isTRUE(lambda.1se)) {
+      warning(
+        "The unconstrained minimum-CV initial estimator does not have a ",
+        "finite CV standard error; the sparsity constraint was not used ",
+        "to move outside the minimum-CV model."
+      )
     }
   }
 
@@ -493,7 +553,19 @@ obtain_initial_pleiotropy <- function(
     cv.loss.mean = cv_summary$mean,
     cv.loss.se = cv_summary$se,
     cv.valid.n = cv_summary$valid.n,
-    cv.loss = cv_loss
+    cv.loss = cv_loss,
+    cv.pleiotropy.prop = cv_pleiotropy_prop,
+    cv.pleiotropy.prop.mean = pleiotropy_prop_mean,
+    cv.pleiotropy.prop.max = pleiotropy_prop_max,
+    selected.cv.pleiotropy.prop =
+      pleiotropy_prop_mean[best_idx[1], best_idx[2]],
+    final.pleiotropy.prop = mean(abs(final_fit$alpha) > 1e-7),
+    max.pleiotropy.prop = max.pleiotropy.prop,
+    sparse_pleiotropy_supported = sparse_pleiotropy_supported,
+    unconstrained.phi = phi_cand[unconstrained_idx[1]],
+    unconstrained.lambda.alpha = lambda.alpha[unconstrained_idx[2]],
+    unconstrained.cv.pleiotropy.prop =
+      pleiotropy_prop_mean[unconstrained_idx[1], unconstrained_idx[2]]
   )
 }
 
@@ -569,7 +641,7 @@ make_phi_grid <- function(iv_strength_parameter, p, length.out) {
     stop("Failed to construct a valid ridge tuning grid.")
   }
   exp(seq(
-    log(upper * 1e2), log(upper * 0.5),
+    log(upper * 1e2), log(upper * 1e-4),
     length.out = as.integer(length.out)
   ))
 }

@@ -22,6 +22,8 @@
 #' @param lambda.alpha Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.
 #' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.
 #' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.
+#' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
+#' @param max.pleiotropy.prop Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.
 #'
 #' @return A list with the following elements:
 #' \item{grouping.hist}{Identified signal-groups across repeated data-thinning runs.}
@@ -47,7 +49,9 @@ mvmr.pacs.datathin <- function(
     pleiotropy = TRUE,
     lambda.alpha = NULL,
     lambda.alpha.length = 20,
-    lambda.alpha.min.ratio = 0.05
+    lambda.alpha.min.ratio = 0.05,
+    lambda.alpha.max.multiplier = 4,
+    max.pleiotropy.prop = 0.10
 ) {
 
   e1 <- 1 / 2
@@ -78,6 +82,10 @@ mvmr.pacs.datathin <- function(
   invalid.snp.hist <- vector("list", re)              # NEW
   n.invalid.snp <- rep(NA_integer_, re)               # NEW
   initial.invalid.snp.hist <- vector("list", re)
+  sparse.pleiotropy.supported.hist <- rep(NA, re)
+  selected.cv.pleiotropy.prop.hist <- rep(NA_real_, re)
+  final.pleiotropy.prop.hist <- rep(NA_real_, re)
+  initial.sparse.pleiotropy.supported.hist <- rep(NA, re)
 
   for (r in 1:re) {
 
@@ -133,9 +141,13 @@ mvmr.pacs.datathin <- function(
         lambda.1se = lambda.1se,
         lambda.alpha = lambda.alpha,
         lambda.alpha.length = lambda.alpha.length,
-        lambda.alpha.min.ratio = lambda.alpha.min.ratio
+        lambda.alpha.min.ratio = lambda.alpha.min.ratio,
+        lambda.alpha.max.multiplier = lambda.alpha.max.multiplier,
+        max.pleiotropy.prop = max.pleiotropy.prop
       )
       initial.invalid.snp.hist[[r]] <- initial.fit$invalid.snp
+      initial.sparse.pleiotropy.supported.hist[r] <-
+        initial.fit$sparse_pleiotropy_supported
     } else {
       initial.fit <- obtain_initial(
         beta.exposure.train, se.exposure.train,
@@ -148,6 +160,7 @@ mvmr.pacs.datathin <- function(
         lambda.1se = lambda.1se
       )
       initial.invalid.snp.hist[[r]] <- integer(0)
+      initial.sparse.pleiotropy.supported.hist[r] <- TRUE
     }
     betawt <- initial.fit$beta
 
@@ -173,7 +186,9 @@ mvmr.pacs.datathin <- function(
       pleiotropy = pleiotropy,
       lambda.alpha = lambda.alpha,
       lambda.alpha.length = lambda.alpha.length,
-      lambda.alpha.min.ratio = lambda.alpha.min.ratio
+      lambda.alpha.min.ratio = lambda.alpha.min.ratio,
+      lambda.alpha.max.multiplier = lambda.alpha.max.multiplier,
+      max.pleiotropy.prop = max.pleiotropy.prop
     )
 
     if (all(round(pacs_res$beta, digit) == 0)) {
@@ -181,6 +196,12 @@ mvmr.pacs.datathin <- function(
     }
 
     grouping_hist[r] <- paste(pacs_res$signal_group, collapse = "-")
+    sparse.pleiotropy.supported.hist[r] <-
+      pacs_res$sparse_pleiotropy_supported
+    selected.cv.pleiotropy.prop.hist[r] <-
+      pacs_res$selected.cv.pleiotropy.prop
+    final.pleiotropy.prop.hist[r] <-
+      pacs_res$final.pleiotropy.prop
 
     # NEW: store pleiotropy results from selection dataset
     if (pleiotropy) {
@@ -266,6 +287,12 @@ mvmr.pacs.datathin <- function(
   res$invalid.snp.hist <- invalid.snp.hist
   res$n.invalid.snp <- n.invalid.snp
   res$initial.invalid.snp.hist <- initial.invalid.snp.hist
+  res$sparse.pleiotropy.supported.hist <- sparse.pleiotropy.supported.hist
+  res$selected.cv.pleiotropy.prop.hist <- selected.cv.pleiotropy.prop.hist
+  res$final.pleiotropy.prop.hist <- final.pleiotropy.prop.hist
+  res$initial.sparse.pleiotropy.supported.hist <-
+    initial.sparse.pleiotropy.supported.hist
+  res$max.pleiotropy.prop <- max.pleiotropy.prop
   res$pleiotropy <- pleiotropy
   res$overlap <- overlap
 
