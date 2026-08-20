@@ -23,7 +23,7 @@
 #' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.
 #' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.
 #' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
-#' @param max.pleiotropy.prop Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.
+#' @param max.pleiotropy.prop Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.
 #'
 #' @return A list with the following elements:
 #' \item{beta}{Estimated direct effects of each exposure on the outcome. Exposures with estimated effects of the same magnitude, up to the specified decimal precision, belong to the same signal-group.}
@@ -42,6 +42,13 @@
 #' \item{beta.init}{Initial beta estimates used to construct adaptive weights.}
 #' \item{cv.loss.mean}{Array of mean cross-validation losses over repeated data-thinning folds.}
 #' \item{cv.loss.sd}{Array of estimated standard errors of the cross-validation losses.}
+#' \item{cv.pleiotropy.prop.mean}{Array of mean proportions of nonzero alpha estimates across CV runs for each tuning combination.}
+#' \item{selected.cv.pleiotropy.prop}{Mean CV pleiotropic proportion for the selected tuning combination; when pleiotropy = TRUE this is constrained to be no larger than max.pleiotropy.prop.}
+#' \item{final.pleiotropy.prop}{Proportion of nonzero alpha estimates after refitting the selected tuning combination to the full data.}
+#' \item{final.pleiotropy.within.cap}{Logical indicator of whether the full-data refit also satisfies max.pleiotropy.prop.}
+#' \item{sparse_pleiotropy_supported}{Logical indicator that an admissible CV tuning combination satisfying max.pleiotropy.prop was available. The function stops if none is available.}
+#' \item{constrained.cv.loss}{CV loss of the minimum-loss model within the prespecified pleiotropy-constrained model class.}
+#' \item{unconstrained.cv.loss}{CV loss of the unrestricted minimum-loss model, retained for diagnostics.}
 #'
 #' @export
 mvmr.pacs <- function(
@@ -406,6 +413,7 @@ mvmr.pacs <- function(
     " data-thinning runs, so that the CV standard error for the minimizer is well defined."
   )
 
+  # Keep the unconstrained minimum only as a diagnostic.
   res_mean_valid <- res_mean
   res_mean_valid[!valid_full] <- Inf
 
@@ -413,102 +421,103 @@ mvmr.pacs <- function(
     res_mean_valid == min(res_mean_valid, na.rm = TRUE),
     arr.ind = TRUE
   )[1, ]
-  best_idx <- unconstrained_idx
-  sparse_pleiotropy_supported <- !pleiotropy
 
+  # HARD SPARSITY CONSTRAINT:
+  # Restrict the admissible tuning set before finding the CV minimum.
+  # Thus max.pleiotropy.prop is honored by the selected CV model rather
+  # than used only as a preference inside the unconstrained 1SE region.
   if (pleiotropy) {
-    if (lambda.1se) {
-      best_se <- res_sd[
-        unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
-      ]
+    sparse_valid <- valid_full &
+      is.finite(prop_alpha_mean) &
+      prop_alpha_mean <= max.pleiotropy.prop
 
-      if (!is.finite(best_se)) {
-        warning(
-          "The unconstrained minimum-CV model does not have a finite CV ",
-          "standard error; the sparsity constraint was not used to move ",
-          "outside the minimum-CV model."
-        )
-        sparse_pleiotropy_supported <-
-          is.finite(prop_alpha_mean[
-            unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
-          ]) &&
-          prop_alpha_mean[
-            unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
-          ] <= max.pleiotropy.prop
-      } else {
-        cutoff <- res_mean[
-          unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
-        ] + best_se
-
-        eligible <- which(
-          res_mean <= cutoff &
-            is.finite(res_mean) &
-            valid_n == n_cv_total &
-            is.finite(prop_alpha_mean) &
-            prop_alpha_mean <= max.pleiotropy.prop,
-          arr.ind = TRUE
-        )
-
-        if (nrow(eligible) > 0L) {
-          sparse_pleiotropy_supported <- TRUE
-
-          # Preserve the current PACS 1SE tie-breaking order.
-          lambda_values_ok <- lambda_cand[eligible[, 1]]
-          max_lambda <- max(lambda_values_ok, na.rm = TRUE)
-          keep1 <- eligible[lambda_values_ok == max_lambda, , drop = FALSE]
-
-          tau_values_ok <- tau[keep1[, 2]]
-          max_tau <- max(tau_values_ok, na.rm = TRUE)
-          keep2 <- keep1[tau_values_ok == max_tau, , drop = FALSE]
-
-          lambda_alpha_values_ok <- lambda.alpha[keep2[, 3]]
-          max_lambda_alpha <- max(lambda_alpha_values_ok, na.rm = TRUE)
-          keep3 <- keep2[
-            lambda_alpha_values_ok == max_lambda_alpha, , drop = FALSE
-          ]
-
-          best_idx <- keep3[1, ]
-        } else {
-          warning(
-            "No MVMR-PACS tuning combination is both within the 1SE ",
-            "region and below max.pleiotropy.prop = ", max.pleiotropy.prop,
-            ". Returning the unconstrained minimum-CV model and setting ",
-            "sparse_pleiotropy_supported = FALSE."
-          )
-        }
-      }
-    } else {
-      sparse_pleiotropy_supported <-
-        is.finite(prop_alpha_mean[
-          unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
-        ]) &&
-        prop_alpha_mean[
-          unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
-        ] <= max.pleiotropy.prop
+    if (!any(sparse_valid)) {
+      min_prop <- suppressWarnings(min(
+        prop_alpha_mean[valid_full & is.finite(prop_alpha_mean)],
+        na.rm = TRUE
+      ))
+      if (!is.finite(min_prop)) min_prop <- NA_real_
+      stop(
+        "No fully valid MVMR-PACS tuning combination satisfies ",
+        "max.pleiotropy.prop = ", max.pleiotropy.prop, ". ",
+        "The smallest mean CV pleiotropic proportion among fully valid ",
+        "candidates was ", signif(min_prop, 4), ". Increase the upper ",
+        "range of lambda.alpha (for example via ",
+        "lambda.alpha.max.multiplier) or reconsider the prespecified cap."
+      )
     }
-  } else if (lambda.1se) {
+  } else {
+    sparse_valid <- valid_full
+  }
+
+  # Minimum CV loss within the admissible (constrained) model class.
+  res_mean_constrained <- res_mean
+  res_mean_constrained[!sparse_valid] <- Inf
+  constrained_idx <- which(
+    res_mean_constrained == min(res_mean_constrained, na.rm = TRUE),
+    arr.ind = TRUE
+  )[1, ]
+  best_idx <- constrained_idx
+
+  # If requested, apply the 1SE rule within the constrained model class.
+  # Preference order follows the scientific objective:
+  #   1) largest PACS lambda (stronger beta grouping/selection),
+  #   2) largest lambda.alpha (sparser SNP-specific pleiotropy),
+  #   3) largest tau as the remaining tie-breaker.
+  if (lambda.1se) {
     best_se <- res_sd[
-      unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+      constrained_idx[1], constrained_idx[2], constrained_idx[3]
     ]
-    if (is.finite(best_se)) {
+
+    if (!is.finite(best_se)) {
+      warning(
+        "The constrained minimum-CV model does not have a finite CV ",
+        "standard error; using the constrained minimum-CV model instead ",
+        "of the 1SE rule."
+      )
+    } else {
       cutoff <- res_mean[
-        unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+        constrained_idx[1], constrained_idx[2], constrained_idx[3]
       ] + best_se
+
       eligible <- which(
-        res_mean <= cutoff & is.finite(res_mean) & valid_n == n_cv_total,
+        sparse_valid & is.finite(res_mean) & res_mean <= cutoff,
         arr.ind = TRUE
       )
+
       if (nrow(eligible) > 0L) {
+        # 1. Stronger beta shrinkage/grouping first.
         lambda_values_ok <- lambda_cand[eligible[, 1]]
         max_lambda <- max(lambda_values_ok, na.rm = TRUE)
-        keep1 <- eligible[lambda_values_ok == max_lambda, , drop = FALSE]
-        tau_values_ok <- tau[keep1[, 2]]
+        keep1 <- eligible[
+          lambda_values_ok == max_lambda, , drop = FALSE
+        ]
+
+        # 2. Then stronger alpha shrinkage.
+        if (pleiotropy) {
+          lambda_alpha_values_ok <- lambda.alpha[keep1[, 3]]
+          max_lambda_alpha <- max(lambda_alpha_values_ok, na.rm = TRUE)
+          keep2 <- keep1[
+            lambda_alpha_values_ok == max_lambda_alpha, , drop = FALSE
+          ]
+        } else {
+          keep2 <- keep1
+        }
+
+        # 3. Remaining tie-breaker: larger tau.
+        tau_values_ok <- tau[keep2[, 2]]
         max_tau <- max(tau_values_ok, na.rm = TRUE)
-        keep2 <- keep1[tau_values_ok == max_tau, , drop = FALSE]
-        best_idx <- keep2[1, ]
+        keep3 <- keep2[
+          tau_values_ok == max_tau, , drop = FALSE
+        ]
+
+        best_idx <- keep3[1, ]
       }
     }
   }
+
+  # By construction, the selected CV model satisfies the prespecified cap.
+  sparse_pleiotropy_supported <- TRUE
 
   pacs.model <- dIVW_PACS_cluster(
     beta.exposure = beta.exposure,
@@ -560,13 +569,42 @@ mvmr.pacs <- function(
   } else {
     0
   }
+  res$final.pleiotropy.within.cap <-
+    !pleiotropy || res$final.pleiotropy.prop <= max.pleiotropy.prop
   res$sparse_pleiotropy_supported <- sparse_pleiotropy_supported
+
+  # Constrained-minimum diagnostics.
+  res$constrained.lambda <- lambda_cand[constrained_idx[1]]
+  res$constrained.tau <- tau[constrained_idx[2]]
+  res$constrained.lambda.alpha <- lambda.alpha[constrained_idx[3]]
+  res$constrained.cv.loss <- res_mean[
+    constrained_idx[1], constrained_idx[2], constrained_idx[3]
+  ]
+  res$constrained.cv.pleiotropy.prop <- prop_alpha_mean[
+    constrained_idx[1], constrained_idx[2], constrained_idx[3]
+  ]
+
+  # Unconstrained optimum retained only for sensitivity/diagnostic reporting.
   res$unconstrained.lambda <- lambda_cand[unconstrained_idx[1]]
   res$unconstrained.tau <- tau[unconstrained_idx[2]]
   res$unconstrained.lambda.alpha <- lambda.alpha[unconstrained_idx[3]]
+  res$unconstrained.cv.loss <- res_mean[
+    unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
+  ]
   res$unconstrained.cv.pleiotropy.prop <- prop_alpha_mean[
     unconstrained_idx[1], unconstrained_idx[2], unconstrained_idx[3]
   ]
+
+  if (pleiotropy && !res$final.pleiotropy.within.cap) {
+    warning(
+      "The selected tuning combination satisfies the mean CV pleiotropy ",
+      "cap (", signif(res$selected.cv.pleiotropy.prop, 4), " <= ",
+      max.pleiotropy.prop, "), but the full-data refit selected a ",
+      "pleiotropic proportion of ", signif(res$final.pleiotropy.prop, 4),
+      ". The tuning parameters were not changed post hoc; inspect ",
+      "final.pleiotropy.within.cap as a stability diagnostic."
+    )
+  }
 
   res$pleiotropy <- pleiotropy
   res$overlap <- overlap

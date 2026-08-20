@@ -78,7 +78,7 @@ mvmr.pacs.datathin(
 
 \item{lambda.alpha.max.multiplier}{Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.}
 
-\item{max.pleiotropy.prop}{Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.}
+\item{max.pleiotropy.prop}{Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.}
 }
 \value{
 A list with the following elements:
@@ -92,6 +92,13 @@ A list with the following elements:
 \item{alpha.hist}{Matrix of estimated SNP-specific pleiotropic effects from the selection dataset across repeated data-thinning runs. If pleiotropy = FALSE, entries are zero.}
 \item{invalid.snp.hist}{A list containing indices of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
 \item{n.invalid.snp}{Number of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
+\item{selected.cv.pleiotropy.prop.hist}{Mean CV pleiotropic proportion for the selected tuning combination in each repeated thinning run.}
+\item{final.pleiotropy.prop.hist}{Full-selection-dataset pleiotropic proportion after refitting the selected tuning combination in each repeated thinning run.}
+\item{final.pleiotropy.within.cap.hist}{Logical indicator for each repeated thinning run of whether the refitted selection model also satisfies max.pleiotropy.prop.}
+\item{initial.selected.cv.pleiotropy.prop.hist}{Mean CV pleiotropic proportion selected by the pleiotropy-aware initial estimator in each repeated thinning run.}
+\item{initial.final.pleiotropy.prop.hist}{Full-selection-dataset pleiotropic proportion from the refitted initial estimator in each repeated thinning run.}
+\item{initial.final.pleiotropy.within.cap.hist}{Logical indicator for each repeated thinning run of whether the refitted initial estimator also satisfies max.pleiotropy.prop.}
+\item{max.pleiotropy.prop}{Prespecified hard upper bound used to define the admissible CV tuning set when pleiotropy = TRUE.}
 \item{pleiotropy}{Logical indicator of whether SNP-specific pleiotropic effects were modeled.}
 }
 \description{

@@ -78,7 +78,7 @@ mvmr.pacs(
 
 \item{lambda.alpha.max.multiplier}{Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.}
 
-\item{max.pleiotropy.prop}{Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.}
+\item{max.pleiotropy.prop}{Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.}
 }
 \value{
 A list with the following elements:
@@ -98,6 +98,13 @@ A list with the following elements:
 \item{beta.init}{Initial beta estimates used to construct adaptive weights.}
 \item{cv.loss.mean}{Array of mean cross-validation losses over repeated data-thinning folds.}
 \item{cv.loss.sd}{Array of estimated standard errors of the cross-validation losses.}
+\item{cv.pleiotropy.prop.mean}{Array of mean proportions of nonzero alpha estimates across CV runs for each tuning combination.}
+\item{selected.cv.pleiotropy.prop}{Mean CV pleiotropic proportion for the selected tuning combination; when pleiotropy = TRUE this is constrained to be no larger than max.pleiotropy.prop.}
+\item{final.pleiotropy.prop}{Proportion of nonzero alpha estimates after refitting the selected tuning combination to the full data.}
+\item{final.pleiotropy.within.cap}{Logical indicator of whether the full-data refit also satisfies max.pleiotropy.prop.}
+\item{sparse_pleiotropy_supported}{Logical indicator that an admissible CV tuning combination satisfying max.pleiotropy.prop was available. The function stops if none is available.}
+\item{constrained.cv.loss}{CV loss of the minimum-loss model within the prespecified pleiotropy-constrained model class.}
+\item{unconstrained.cv.loss}{CV loss of the unrestricted minimum-loss model, retained for diagnostics.}
 }
 \description{
 Function to perform the MVMR-PACS estimator for signal-group identification and variable selection in two-sample multivariable Mendelian randomization with highly correlated exposures.

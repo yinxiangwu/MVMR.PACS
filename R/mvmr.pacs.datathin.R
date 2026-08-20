@@ -23,7 +23,7 @@
 #' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.
 #' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.
 #' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
-#' @param max.pleiotropy.prop Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.
+#' @param max.pleiotropy.prop Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.
 #'
 #' @return A list with the following elements:
 #' \item{grouping.hist}{Identified signal-groups across repeated data-thinning runs.}
@@ -36,6 +36,13 @@
 #' \item{alpha.hist}{Matrix of estimated SNP-specific pleiotropic effects from the selection dataset across repeated data-thinning runs. If pleiotropy = FALSE, entries are zero.}
 #' \item{invalid.snp.hist}{A list containing indices of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
 #' \item{n.invalid.snp}{Number of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
+#' \item{selected.cv.pleiotropy.prop.hist}{Mean CV pleiotropic proportion for the selected tuning combination in each repeated thinning run.}
+#' \item{final.pleiotropy.prop.hist}{Full-selection-dataset pleiotropic proportion after refitting the selected tuning combination in each repeated thinning run.}
+#' \item{final.pleiotropy.within.cap.hist}{Logical indicator for each repeated thinning run of whether the refitted selection model also satisfies max.pleiotropy.prop.}
+#' \item{initial.selected.cv.pleiotropy.prop.hist}{Mean CV pleiotropic proportion selected by the pleiotropy-aware initial estimator in each repeated thinning run.}
+#' \item{initial.final.pleiotropy.prop.hist}{Full-selection-dataset pleiotropic proportion from the refitted initial estimator in each repeated thinning run.}
+#' \item{initial.final.pleiotropy.within.cap.hist}{Logical indicator for each repeated thinning run of whether the refitted initial estimator also satisfies max.pleiotropy.prop.}
+#' \item{max.pleiotropy.prop}{Prespecified hard upper bound used to define the admissible CV tuning set when pleiotropy = TRUE.}
 #' \item{pleiotropy}{Logical indicator of whether SNP-specific pleiotropic effects were modeled.}
 #'
 #' @export
@@ -85,7 +92,11 @@ mvmr.pacs.datathin <- function(
   sparse.pleiotropy.supported.hist <- rep(NA, re)
   selected.cv.pleiotropy.prop.hist <- rep(NA_real_, re)
   final.pleiotropy.prop.hist <- rep(NA_real_, re)
+  final.pleiotropy.within.cap.hist <- rep(NA, re)
   initial.sparse.pleiotropy.supported.hist <- rep(NA, re)
+  initial.selected.cv.pleiotropy.prop.hist <- rep(NA_real_, re)
+  initial.final.pleiotropy.prop.hist <- rep(NA_real_, re)
+  initial.final.pleiotropy.within.cap.hist <- rep(NA, re)
 
   for (r in 1:re) {
 
@@ -148,6 +159,12 @@ mvmr.pacs.datathin <- function(
       initial.invalid.snp.hist[[r]] <- initial.fit$invalid.snp
       initial.sparse.pleiotropy.supported.hist[r] <-
         initial.fit$sparse_pleiotropy_supported
+      initial.selected.cv.pleiotropy.prop.hist[r] <-
+        initial.fit$selected.cv.pleiotropy.prop
+      initial.final.pleiotropy.prop.hist[r] <-
+        initial.fit$final.pleiotropy.prop
+      initial.final.pleiotropy.within.cap.hist[r] <-
+        initial.fit$final.pleiotropy.within.cap
     } else {
       initial.fit <- obtain_initial(
         beta.exposure.train, se.exposure.train,
@@ -161,6 +178,9 @@ mvmr.pacs.datathin <- function(
       )
       initial.invalid.snp.hist[[r]] <- integer(0)
       initial.sparse.pleiotropy.supported.hist[r] <- TRUE
+      initial.selected.cv.pleiotropy.prop.hist[r] <- 0
+      initial.final.pleiotropy.prop.hist[r] <- 0
+      initial.final.pleiotropy.within.cap.hist[r] <- TRUE
     }
     betawt <- initial.fit$beta
 
@@ -202,6 +222,8 @@ mvmr.pacs.datathin <- function(
       pacs_res$selected.cv.pleiotropy.prop
     final.pleiotropy.prop.hist[r] <-
       pacs_res$final.pleiotropy.prop
+    final.pleiotropy.within.cap.hist[r] <-
+      pacs_res$final.pleiotropy.within.cap
 
     # NEW: store pleiotropy results from selection dataset
     if (pleiotropy) {
@@ -290,8 +312,15 @@ mvmr.pacs.datathin <- function(
   res$sparse.pleiotropy.supported.hist <- sparse.pleiotropy.supported.hist
   res$selected.cv.pleiotropy.prop.hist <- selected.cv.pleiotropy.prop.hist
   res$final.pleiotropy.prop.hist <- final.pleiotropy.prop.hist
+  res$final.pleiotropy.within.cap.hist <- final.pleiotropy.within.cap.hist
   res$initial.sparse.pleiotropy.supported.hist <-
     initial.sparse.pleiotropy.supported.hist
+  res$initial.selected.cv.pleiotropy.prop.hist <-
+    initial.selected.cv.pleiotropy.prop.hist
+  res$initial.final.pleiotropy.prop.hist <-
+    initial.final.pleiotropy.prop.hist
+  res$initial.final.pleiotropy.within.cap.hist <-
+    initial.final.pleiotropy.within.cap.hist
   res$max.pleiotropy.prop <- max.pleiotropy.prop
   res$pleiotropy <- pleiotropy
   res$overlap <- overlap

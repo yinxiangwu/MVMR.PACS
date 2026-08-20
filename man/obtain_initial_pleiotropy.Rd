@@ -62,7 +62,7 @@ obtain_initial_pleiotropy(
 
 \item{lambda.alpha.max.multiplier}{Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.}
 
-\item{max.pleiotropy.prop}{Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.}
+\item{max.pleiotropy.prop}{Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.}
 
 \item{max.iter}{Maximum alternating updates. Default = 200.}
 
@@ -70,7 +70,12 @@ obtain_initial_pleiotropy(
 }
 \value{
 A list with beta, alpha, invalid.snp, selected tuning parameters,
-tuning grids, convergence information, and CV diagnostics.
+tuning grids, convergence information, and CV diagnostics. The selected
+CV tuning combination is constrained to have mean pleiotropic proportion
+no larger than max.pleiotropy.prop. The returned diagnostics include
+selected.cv.pleiotropy.prop, final.pleiotropy.prop,
+final.pleiotropy.within.cap, constrained.cv.loss, and corresponding
+unconstrained optimum quantities for sensitivity assessment.
 }
 \description{
 Obtain pleiotropy-robust initial beta coefficients.

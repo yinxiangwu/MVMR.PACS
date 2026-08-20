@@ -203,12 +203,17 @@ obtain_initial <- function(
 #' @param lambda.alpha.length Length of the lambda.alpha grid. Default = 20.
 #' @param lambda.alpha.min.ratio Smallest-to-largest lambda.alpha ratio.
 #' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
-#' @param max.pleiotropy.prop Prespecified upper bound on the mean proportion of nonzero alpha estimates across CV folds. Default = 0.10.
+#' @param max.pleiotropy.prop Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.
 #' @param max.iter Maximum alternating updates. Default = 200.
 #' @param err Joint absolute-relative convergence tolerance. Default = 1e-4.
 #'
 #' @return A list with beta, alpha, invalid.snp, selected tuning parameters,
-#'   tuning grids, convergence information, and CV diagnostics.
+#'   tuning grids, convergence information, and CV diagnostics. The selected
+#'   CV tuning combination is constrained to have mean pleiotropic proportion
+#'   no larger than max.pleiotropy.prop. The returned diagnostics include
+#'   selected.cv.pleiotropy.prop, final.pleiotropy.prop,
+#'   final.pleiotropy.within.cap, constrained.cv.loss, and corresponding
+#'   unconstrained optimum quantities for sensitivity assessment.
 #' @export
 obtain_initial_pleiotropy <- function(
     beta.exposure,
@@ -459,57 +464,85 @@ obtain_initial_pleiotropy <- function(
     }
   )
 
+  # Keep the unconstrained minimum only as a diagnostic.
   loss_valid <- cv_summary$mean
   loss_valid[!valid_full] <- Inf
   unconstrained_idx <- which(
-    loss_valid == min(loss_valid), arr.ind = TRUE
+    loss_valid == min(loss_valid, na.rm = TRUE),
+    arr.ind = TRUE
   )[1, ]
-  best_idx <- unconstrained_idx
-  sparse_pleiotropy_supported <- FALSE
 
-  if (isTRUE(lambda.1se) &&
-      is.finite(cv_summary$se[unconstrained_idx[1], unconstrained_idx[2]])) {
-    cutoff <- cv_summary$mean[unconstrained_idx[1], unconstrained_idx[2]] +
-      cv_summary$se[unconstrained_idx[1], unconstrained_idx[2]]
-    eligible <- which(
-      valid_full & is.finite(cv_summary$mean) &
-        cv_summary$mean <= cutoff &
-        is.finite(pleiotropy_prop_mean) &
-        pleiotropy_prop_mean <= max.pleiotropy.prop,
-      arr.ind = TRUE
+  # HARD SPARSITY CONSTRAINT:
+  # Restrict admissible (phi, lambda.alpha) combinations before selecting
+  # the CV minimum. This guarantees that the selected CV initial estimator
+  # honors max.pleiotropy.prop.
+  sparse_valid <- valid_full &
+    is.finite(pleiotropy_prop_mean) &
+    pleiotropy_prop_mean <= max.pleiotropy.prop
+
+  if (!any(sparse_valid)) {
+    min_prop <- suppressWarnings(min(
+      pleiotropy_prop_mean[valid_full & is.finite(pleiotropy_prop_mean)],
+      na.rm = TRUE
+    ))
+    if (!is.finite(min_prop)) min_prop <- NA_real_
+    stop(
+      "No fully valid pleiotropy-aware initial-estimator tuning ",
+      "combination satisfies max.pleiotropy.prop = ",
+      max.pleiotropy.prop, ". The smallest mean CV pleiotropic ",
+      "proportion among fully valid candidates was ", signif(min_prop, 4),
+      ". Increase the upper range of lambda.alpha (for example via ",
+      "lambda.alpha.max.multiplier) or reconsider the prespecified cap."
     )
-    if (nrow(eligible) > 0L) {
-      sparse_pleiotropy_supported <- TRUE
-      max_alpha <- max(lambda.alpha[eligible[, 2]])
-      eligible <- eligible[
-        lambda.alpha[eligible[, 2]] == max_alpha, , drop = FALSE
-      ]
-      max_phi <- max(phi_cand[eligible[, 1]])
-      eligible <- eligible[
-        phi_cand[eligible[, 1]] == max_phi, , drop = FALSE
-      ]
-      best_idx <- eligible[1, ]
+  }
+
+  constrained_loss <- cv_summary$mean
+  constrained_loss[!sparse_valid] <- Inf
+  constrained_idx <- which(
+    constrained_loss == min(constrained_loss, na.rm = TRUE),
+    arr.ind = TRUE
+  )[1, ]
+  best_idx <- constrained_idx
+
+  # Apply the 1SE rule within the constrained model class.
+  # Preference order: stronger beta regularization first (larger phi),
+  # then stronger alpha regularization (larger lambda.alpha).
+  if (isTRUE(lambda.1se)) {
+    best_se <- cv_summary$se[constrained_idx[1], constrained_idx[2]]
+
+    if (!is.finite(best_se)) {
+      warning(
+        "The constrained minimum-CV initial estimator does not have a ",
+        "finite CV standard error; using the constrained minimum-CV ",
+        "model instead of the 1SE rule."
+      )
     } else {
-      warning(
-        "No initial-estimator tuning combination is both within the 1SE ",
-        "region and below max.pleiotropy.prop = ", max.pleiotropy.prop,
-        ". Returning the unconstrained minimum-CV initial estimator and ",
-        "setting sparse_pleiotropy_supported = FALSE."
+      cutoff <- cv_summary$mean[constrained_idx[1], constrained_idx[2]] +
+        best_se
+      eligible <- which(
+        sparse_valid & is.finite(cv_summary$mean) &
+          cv_summary$mean <= cutoff,
+        arr.ind = TRUE
       )
-    }
-  } else {
-    sparse_pleiotropy_supported <-
-      is.finite(pleiotropy_prop_mean[unconstrained_idx[1], unconstrained_idx[2]]) &&
-      pleiotropy_prop_mean[unconstrained_idx[1], unconstrained_idx[2]] <=
-      max.pleiotropy.prop
-    if (isTRUE(lambda.1se)) {
-      warning(
-        "The unconstrained minimum-CV initial estimator does not have a ",
-        "finite CV standard error; the sparsity constraint was not used ",
-        "to move outside the minimum-CV model."
-      )
+
+      if (nrow(eligible) > 0L) {
+        # 1. Stronger beta ridge regularization first.
+        max_phi <- max(phi_cand[eligible[, 1]], na.rm = TRUE)
+        keep1 <- eligible[
+          phi_cand[eligible[, 1]] == max_phi, , drop = FALSE
+        ]
+
+        # 2. Then stronger alpha shrinkage.
+        max_alpha <- max(lambda.alpha[keep1[, 2]], na.rm = TRUE)
+        keep2 <- keep1[
+          lambda.alpha[keep1[, 2]] == max_alpha, , drop = FALSE
+        ]
+        best_idx <- keep2[1, ]
+      }
     }
   }
+
+  sparse_pleiotropy_supported <- TRUE
 
   final_cache <- prepare_mvmr_ridge_system(
     beta.exposure, se.exposure, se.outcome, P.exposure, epsilon
@@ -537,6 +570,18 @@ obtain_initial_pleiotropy <- function(
   )
 
   invalid.snp <- which(abs(final_fit$alpha) > 1e-7)
+  final_pleiotropy_prop <- mean(abs(final_fit$alpha) > 1e-7)
+
+  if (final_pleiotropy_prop > max.pleiotropy.prop) {
+    warning(
+      "The selected initial-estimator tuning combination satisfies the ",
+      "mean CV pleiotropy cap (",
+      signif(pleiotropy_prop_mean[best_idx[1], best_idx[2]], 4),
+      " <= ", max.pleiotropy.prop, "), but the full-data refit selected ",
+      "a pleiotropic proportion of ", signif(final_pleiotropy_prop, 4),
+      ". The tuning parameters were not changed post hoc."
+    )
+  }
 
   list(
     beta = as.numeric(final_fit$beta),
@@ -559,11 +604,21 @@ obtain_initial_pleiotropy <- function(
     cv.pleiotropy.prop.max = pleiotropy_prop_max,
     selected.cv.pleiotropy.prop =
       pleiotropy_prop_mean[best_idx[1], best_idx[2]],
-    final.pleiotropy.prop = mean(abs(final_fit$alpha) > 1e-7),
+    final.pleiotropy.prop = final_pleiotropy_prop,
+    final.pleiotropy.within.cap =
+      final_pleiotropy_prop <= max.pleiotropy.prop,
     max.pleiotropy.prop = max.pleiotropy.prop,
     sparse_pleiotropy_supported = sparse_pleiotropy_supported,
+    constrained.phi = phi_cand[constrained_idx[1]],
+    constrained.lambda.alpha = lambda.alpha[constrained_idx[2]],
+    constrained.cv.loss =
+      cv_summary$mean[constrained_idx[1], constrained_idx[2]],
+    constrained.cv.pleiotropy.prop =
+      pleiotropy_prop_mean[constrained_idx[1], constrained_idx[2]],
     unconstrained.phi = phi_cand[unconstrained_idx[1]],
     unconstrained.lambda.alpha = lambda.alpha[unconstrained_idx[2]],
+    unconstrained.cv.loss =
+      cv_summary$mean[unconstrained_idx[1], unconstrained_idx[2]],
     unconstrained.cv.pleiotropy.prop =
       pleiotropy_prop_mean[unconstrained_idx[1], unconstrained_idx[2]]
   )
