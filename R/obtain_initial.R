@@ -696,7 +696,7 @@ make_phi_grid <- function(iv_strength_parameter, p, length.out) {
     stop("Failed to construct a valid ridge tuning grid.")
   }
   exp(seq(
-    log(upper * 1e2), log(upper * 1e-4),
+    log(upper * 1e2), log(upper * 0.5),
     length.out = as.integer(length.out)
   ))
 }

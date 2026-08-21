@@ -6,6 +6,7 @@
 #' @param se.outcome A numeric vector of estimated standard errors corresponding to beta.outcome.
 #' @param P A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.
 #' @param overlap Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.
+#' @param initial.overlap Logical. Whether the initial estimator fitted within each selection dataset should account for exposure-outcome sample overlap. By default, inherits overlap. It may be set to FALSE when overlap = TRUE so that the initial estimator ignores overlap while MVMR-PACS and post-selection inference still account for it. Setting initial.overlap = TRUE when overlap = FALSE is not supported because P does not contain exposure-outcome correlations in that setting.
 #' @param type Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.
 #' @param rr_cut_off Pre-specified correlation cutoff used in the weighting schemes specified by type. Default = 0.
 #' @param tau Numeric vector of candidate values for the adaptive weighting parameter. Default = c(0.5, 1, 2, 3).
@@ -19,11 +20,12 @@
 #' @param lambda.1se Logical. Whether to use the one-standard-error rule when selecting tuning parameters. Default = TRUE.
 #' @param lambda.length Length of the candidate tuning parameter sequence for the PACS penalty. Default = 20.
 #' @param pleiotropy Logical. Whether to allow and select SNP-specific pleiotropic effects using an additional l1 penalty in the selection dataset. Default = TRUE.
-#' @param lambda.alpha Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.
-#' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.
-#' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.
-#' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
-#' @param max.pleiotropy.prop Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.
+#' @param initial.pleiotropy Logical. Whether the initial estimator fitted within each selection dataset should use the pleiotropy-robust initial estimator. By default, inherits pleiotropy.
+#' @param lambda.alpha Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. This grid is used by each pleiotropy-enabled stage, including the initial estimator when initial.pleiotropy = TRUE. Default = NULL, in which case a data-dependent decreasing sequence is constructed.
+#' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Applies to each pleiotropy-enabled stage. Default = 20.
+#' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Applies to each pleiotropy-enabled stage. Default = 0.05.
+#' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid for each pleiotropy-enabled stage. Default = 4.
+#' @param max.pleiotropy.prop Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds for each pleiotropy-enabled stage. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.
 #'
 #' @return A list with the following elements:
 #' \item{grouping.hist}{Identified signal-groups across repeated data-thinning runs.}
@@ -36,14 +38,18 @@
 #' \item{alpha.hist}{Matrix of estimated SNP-specific pleiotropic effects from the selection dataset across repeated data-thinning runs. If pleiotropy = FALSE, entries are zero.}
 #' \item{invalid.snp.hist}{A list containing indices of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
 #' \item{n.invalid.snp}{Number of SNPs identified as pleiotropic in the selection dataset for each repeated data-thinning run.}
+#' \item{initial.invalid.snp.hist}{A list containing indices of SNPs identified as pleiotropic by the initial estimator in each repeated data-thinning run. Empty integer vectors are returned when initial.pleiotropy = FALSE.}
 #' \item{selected.cv.pleiotropy.prop.hist}{Mean CV pleiotropic proportion for the selected tuning combination in each repeated thinning run.}
 #' \item{final.pleiotropy.prop.hist}{Full-selection-dataset pleiotropic proportion after refitting the selected tuning combination in each repeated thinning run.}
 #' \item{final.pleiotropy.within.cap.hist}{Logical indicator for each repeated thinning run of whether the refitted selection model also satisfies max.pleiotropy.prop.}
-#' \item{initial.selected.cv.pleiotropy.prop.hist}{Mean CV pleiotropic proportion selected by the pleiotropy-aware initial estimator in each repeated thinning run.}
-#' \item{initial.final.pleiotropy.prop.hist}{Full-selection-dataset pleiotropic proportion from the refitted initial estimator in each repeated thinning run.}
-#' \item{initial.final.pleiotropy.within.cap.hist}{Logical indicator for each repeated thinning run of whether the refitted initial estimator also satisfies max.pleiotropy.prop.}
+#' \item{initial.selected.cv.pleiotropy.prop.hist}{Mean CV pleiotropic proportion selected by the initial estimator in each repeated thinning run. Equals zero when initial.pleiotropy = FALSE.}
+#' \item{initial.final.pleiotropy.prop.hist}{Full-selection-dataset pleiotropic proportion from the refitted initial estimator in each repeated thinning run. Equals zero when initial.pleiotropy = FALSE.}
+#' \item{initial.final.pleiotropy.within.cap.hist}{Logical indicator for each repeated thinning run of whether the refitted initial estimator satisfies max.pleiotropy.prop. Equals TRUE when initial.pleiotropy = FALSE.}
 #' \item{max.pleiotropy.prop}{Prespecified hard upper bound used to define the admissible CV tuning set when pleiotropy = TRUE.}
 #' \item{pleiotropy}{Logical indicator of whether SNP-specific pleiotropic effects were modeled.}
+#' \item{overlap}{Logical indicator of whether MVMR-PACS and post-selection inference accounted for exposure-outcome overlap.}
+#' \item{initial.pleiotropy}{Logical indicator of whether the initial estimator modeled SNP-specific pleiotropic effects.}
+#' \item{initial.overlap}{Logical indicator of whether the initial estimator accounted for exposure-outcome overlap.}
 #'
 #' @export
 mvmr.pacs.datathin <- function(
@@ -58,15 +64,26 @@ mvmr.pacs.datathin <- function(
     lambda.alpha.length = 20,
     lambda.alpha.min.ratio = 0.05,
     lambda.alpha.max.multiplier = 4,
-    max.pleiotropy.prop = 0.10
+    max.pleiotropy.prop = 0.10,
+    initial.overlap = overlap,
+    initial.pleiotropy = pleiotropy
 ) {
 
   e1 <- 1 / 2
+
+  validate_initial_options(
+    overlap = overlap,
+    pleiotropy = pleiotropy,
+    initial.overlap = initial.overlap,
+    initial.pleiotropy = initial.pleiotropy,
+    initial.required = TRUE
+  )
 
   p <- nrow(beta.exposure)
   K <- ncol(beta.exposure)
   overlap.info <- parse_overlap_correlation(P, K, overlap)
   P.exposure <- overlap.info$P.exposure
+  P.initial <- if (isTRUE(initial.overlap)) P else P.exposure
   if (isTRUE(overlap) && isTRUE(over.dispersion)) {
     stop(
       "Simultaneous overlap = TRUE and over.dispersion = TRUE is not ",
@@ -140,13 +157,13 @@ mvmr.pacs.datathin <- function(
       gen_cor = P.exposure
     )$iv_strength_parameter
 
-    if (pleiotropy) {
+    if (isTRUE(initial.pleiotropy)) {
       initial.fit <- obtain_initial_pleiotropy(
         beta.exposure.train, se.exposure.train,
         beta.outcome.train, se.outcome.train,
         iv_strength_parameter = iv_str_train,
-        n_times = n_times, P = P,
-        overlap = overlap,
+        n_times = n_times, P = P.initial,
+        overlap = initial.overlap,
         epsilon = epsilon,
         lambda.length = lambda.length,
         lambda.1se = lambda.1se,
@@ -170,8 +187,8 @@ mvmr.pacs.datathin <- function(
         beta.exposure.train, se.exposure.train,
         beta.outcome.train, se.outcome.train,
         iv_strength_parameter = iv_str_train,
-        n_times = n_times, P = P,
-        overlap = overlap,
+        n_times = n_times, P = P.initial,
+        overlap = initial.overlap,
         epsilon = epsilon,
         lambda.length = lambda.length,
         lambda.1se = lambda.1se
@@ -193,6 +210,7 @@ mvmr.pacs.datathin <- function(
       se.outcome = se.outcome.train,
       P = P,
       overlap = overlap,
+      initial.overlap = initial.overlap,
       type = type,
       rr_cut_off = rr_cut_off,
       betawt = betawt,
@@ -204,6 +222,7 @@ mvmr.pacs.datathin <- function(
       n_times = n_times,
       lambda.1se = lambda.1se,
       pleiotropy = pleiotropy,
+      initial.pleiotropy = initial.pleiotropy,
       lambda.alpha = lambda.alpha,
       lambda.alpha.length = lambda.alpha.length,
       lambda.alpha.min.ratio = lambda.alpha.min.ratio,
@@ -324,6 +343,8 @@ mvmr.pacs.datathin <- function(
   res$max.pleiotropy.prop <- max.pleiotropy.prop
   res$pleiotropy <- pleiotropy
   res$overlap <- overlap
+  res$initial.pleiotropy <- initial.pleiotropy
+  res$initial.overlap <- initial.overlap
 
   return(res)
 }

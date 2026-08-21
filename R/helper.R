@@ -29,6 +29,35 @@ parse_overlap_correlation <- function(P, K, overlap = FALSE) {
   )
 }
 
+validate_initial_options <- function(
+    overlap, pleiotropy, initial.overlap, initial.pleiotropy,
+    initial.required = TRUE
+) {
+  flags <- list(
+    overlap = overlap,
+    pleiotropy = pleiotropy,
+    initial.overlap = initial.overlap,
+    initial.pleiotropy = initial.pleiotropy
+  )
+
+  for (nm in names(flags)) {
+    x <- flags[[nm]]
+    if (!is.logical(x) || length(x) != 1L || is.na(x)) {
+      stop(nm, " must be TRUE or FALSE.")
+    }
+  }
+
+  if (isTRUE(initial.required) && isTRUE(initial.overlap) && !isTRUE(overlap)) {
+    stop(
+      "initial.overlap = TRUE requires overlap = TRUE because a K-by-K P ",
+      "matrix does not contain the exposure-outcome correlations needed by ",
+      "the overlap-adjusted initial estimator."
+    )
+  }
+
+  invisible(TRUE)
+}
+
 compute_overlap_bias <- function(se.exposure, se.outcome, rho.xy) {
   se.exposure <- as.matrix(se.exposure)
   se.outcome <- as.numeric(se.outcome)
