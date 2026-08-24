@@ -6,7 +6,6 @@
 #' @param se.outcome A numeric vector of estimated standard errors corresponding to beta.outcome.
 #' @param P A K-by-K exposure correlation matrix when overlap = FALSE, or a (K+1)-by-(K+1) joint exposure-outcome correlation matrix when overlap = TRUE.
 #' @param overlap Logical. Whether exposure and outcome GWAS summary statistics overlap. Default = FALSE.
-#' @param initial.overlap Logical. Whether the internally estimated initial coefficients should account for exposure-outcome sample overlap. By default, inherits overlap. It may be set to FALSE when overlap = TRUE so that the initial estimator ignores overlap while MVMR-PACS still accounts for it. Setting initial.overlap = TRUE when overlap = FALSE is not supported because P does not contain exposure-outcome correlations in that setting. This argument is only used when betawt = NULL.
 #' @param type Weighting scheme in penalization: 1 = weights independent of the correlation between beta.exposure; 2 = weights inversely related to the correlation between beta.exposure; 3 = weights nonzero only if the absolute correlation between beta.exposure is greater than rr_cut_off; 4 = weights inversely related to the correlation between beta.exposure only if the absolute correlation between beta.exposure is greater than rr_cut_off.
 #' @param rr_cut_off Pre-specified correlation cutoff used in the weighting schemes specified by type. Default = 0.
 #' @param fix.cor Logical. Whether to use the full-data correlation matrix of beta.exposure in cross-validation instead of recomputing the correlation matrix within each training fold. Default = FALSE.
@@ -20,12 +19,11 @@
 #' @param seed Seed for reproducibility. Default = NULL.
 #' @param lambda.1se Logical. Whether to use the one-standard-error rule when selecting tuning parameters. Default = TRUE.
 #' @param pleiotropy Logical. Whether to allow and select SNP-specific pleiotropic effects using an additional l1 penalty. Default = TRUE.
-#' @param initial.pleiotropy Logical. Whether the internally estimated initial coefficients should use the pleiotropy-robust initial estimator. By default, inherits pleiotropy. This argument is only used when betawt = NULL.
-#' @param lambda.alpha Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. This grid is used by each pleiotropy-enabled stage, including the initial estimator when initial.pleiotropy = TRUE. Default = NULL, in which case a data-dependent decreasing sequence is constructed.
-#' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Applies to each pleiotropy-enabled stage. Default = 20.
-#' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Applies to each pleiotropy-enabled stage. Default = 0.05.
-#' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid for each pleiotropy-enabled stage. Default = 4.
-#' @param max.pleiotropy.prop Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds for each pleiotropy-enabled stage. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.
+#' @param lambda.alpha Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.
+#' @param lambda.alpha.length Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.
+#' @param lambda.alpha.min.ratio Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.
+#' @param lambda.alpha.max.multiplier Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.
+#' @param max.pleiotropy.prop Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.
 #'
 #' @return A list with the following elements:
 #' \item{beta}{Estimated direct effects of each exposure on the outcome. Exposures with estimated effects of the same magnitude, up to the specified decimal precision, belong to the same signal-group.}
@@ -41,8 +39,6 @@
 #' \item{lambda.alpha}{Selected tuning parameter for the l1 penalty on SNP-specific pleiotropic effects.}
 #' \item{lambda.alpha.grid}{Candidate tuning parameter sequence used for the l1 penalty on SNP-specific pleiotropic effects.}
 #' \item{pleiotropy}{Logical indicator of whether pleiotropic effects were modeled.}
-#' \item{initial.overlap}{Requested overlap setting for the internal initial estimator; operative when betawt = NULL.}
-#' \item{initial.pleiotropy}{Requested pleiotropy setting for the internal initial estimator; operative when betawt = NULL.}
 #' \item{beta.init}{Initial beta estimates used to construct adaptive weights.}
 #' \item{cv.loss.mean}{Array of mean cross-validation losses over repeated data-thinning folds.}
 #' \item{cv.loss.sd}{Array of estimated standard errors of the cross-validation losses.}
@@ -67,9 +63,7 @@ mvmr.pacs <- function(
     lambda.alpha.length = 20,            # NEW
     lambda.alpha.min.ratio = 0.05,       # NEW
     lambda.alpha.max.multiplier = 4,     # NEW
-    max.pleiotropy.prop = 0.10,          # NEW
-    initial.overlap = overlap,
-    initial.pleiotropy = pleiotropy
+    max.pleiotropy.prop = 0.10           # NEW
 ) {
 
   e <- 1 / CV_fold
@@ -79,15 +73,7 @@ mvmr.pacs <- function(
   beta.outcome <- as.numeric(beta.outcome)
   se.outcome <- as.numeric(se.outcome)
 
-  validate_initial_options(
-    overlap = overlap,
-    pleiotropy = pleiotropy,
-    initial.overlap = initial.overlap,
-    initial.pleiotropy = initial.pleiotropy,
-    initial.required = is.null(betawt)
-  )
-
-  if (isTRUE(pleiotropy) || (is.null(betawt) && isTRUE(initial.pleiotropy))) {
+  if (pleiotropy) {
     if (length(lambda.alpha.max.multiplier) != 1L ||
         !is.finite(lambda.alpha.max.multiplier) ||
         lambda.alpha.max.multiplier < 1) {
@@ -107,7 +93,6 @@ mvmr.pacs <- function(
   overlap.info <- parse_overlap_correlation(P, K, overlap)
   P.exposure <- overlap.info$P.exposure
   rho.xy <- overlap.info$rho.xy
-  P.initial <- if (isTRUE(initial.overlap)) P else P.exposure
 
   iv_strength_parameter <- mr.divw::mvmr.ivw(
     beta.exposure = beta.exposure,
@@ -119,11 +104,11 @@ mvmr.pacs <- function(
 
   initial.fit <- NULL
   if (is.null(betawt)) {
-    if (isTRUE(initial.pleiotropy)) {
+    if (pleiotropy) {
       initial.fit <- obtain_initial_pleiotropy(
         beta.exposure, se.exposure, beta.outcome, se.outcome,
-        iv_strength_parameter, P.initial,
-        overlap = initial.overlap,
+        iv_strength_parameter, P,
+        overlap = overlap,
         lambda.length = lambda.length,
         seed = seed,
         epsilon = eps,
@@ -139,8 +124,8 @@ mvmr.pacs <- function(
     } else {
       initial.fit <- obtain_initial(
         beta.exposure, se.exposure, beta.outcome, se.outcome,
-        iv_strength_parameter, P.initial,
-        overlap = initial.overlap,
+        iv_strength_parameter, P,
+        overlap = overlap,
         lambda.length = lambda.length,
         seed = seed,
         epsilon = eps,
@@ -623,8 +608,6 @@ mvmr.pacs <- function(
 
   res$pleiotropy <- pleiotropy
   res$overlap <- overlap
-  res$initial.pleiotropy <- initial.pleiotropy
-  res$initial.overlap <- initial.overlap
   res$beta.init <- betawt
   res$initial.fit <- initial.fit
   res$initial.invalid.snp <- if (!is.null(initial.fit$invalid.snp)) {

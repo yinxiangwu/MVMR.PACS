@@ -28,9 +28,7 @@ mvmr.pacs(
   lambda.alpha.length = 20,
   lambda.alpha.min.ratio = 0.05,
   lambda.alpha.max.multiplier = 4,
-  max.pleiotropy.prop = 0.1,
-  initial.overlap = overlap,
-  initial.pleiotropy = pleiotropy
+  max.pleiotropy.prop = 0.1
 )
 }
 \arguments{
@@ -72,19 +70,15 @@ mvmr.pacs(
 
 \item{pleiotropy}{Logical. Whether to allow and select SNP-specific pleiotropic effects using an additional l1 penalty. Default = TRUE.}
 
-\item{lambda.alpha}{Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. This grid is used by each pleiotropy-enabled stage, including the initial estimator when initial.pleiotropy = TRUE. Default = NULL, in which case a data-dependent decreasing sequence is constructed.}
+\item{lambda.alpha}{Optional numeric vector of candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects. Default = NULL, in which case a data-dependent decreasing sequence is constructed.}
 
-\item{lambda.alpha.length}{Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Applies to each pleiotropy-enabled stage. Default = 20.}
+\item{lambda.alpha.length}{Length of the candidate tuning parameter sequence for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 20.}
 
-\item{lambda.alpha.min.ratio}{Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Applies to each pleiotropy-enabled stage. Default = 0.05.}
+\item{lambda.alpha.min.ratio}{Ratio between the smallest and largest candidate tuning parameter values for the l1 penalty on SNP-specific pleiotropic effects when lambda.alpha = NULL. Default = 0.05.}
 
-\item{lambda.alpha.max.multiplier}{Multiplier applied to the data-dependent upper end of the lambda.alpha grid for each pleiotropy-enabled stage. Default = 4.}
+\item{lambda.alpha.max.multiplier}{Multiplier applied to the data-dependent upper end of the lambda.alpha grid. Default = 4.}
 
-\item{max.pleiotropy.prop}{Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds for each pleiotropy-enabled stage. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.}
-
-\item{initial.overlap}{Logical. Whether the internally estimated initial coefficients should account for exposure-outcome sample overlap. By default, inherits overlap. It may be set to FALSE when overlap = TRUE so that the initial estimator ignores overlap while MVMR-PACS still accounts for it. Setting initial.overlap = TRUE when overlap = FALSE is not supported because P does not contain exposure-outcome correlations in that setting. This argument is only used when betawt = NULL.}
-
-\item{initial.pleiotropy}{Logical. Whether the internally estimated initial coefficients should use the pleiotropy-robust initial estimator. By default, inherits pleiotropy. This argument is only used when betawt = NULL.}
+\item{max.pleiotropy.prop}{Prespecified hard upper bound on the mean proportion of nonzero alpha estimates across CV folds. The admissible tuning set is restricted to combinations satisfying this bound before minimum-CV and 1SE selection. Default = 0.10.}
 }
 \value{
 A list with the following elements:
@@ -101,8 +95,6 @@ A list with the following elements:
 \item{lambda.alpha}{Selected tuning parameter for the l1 penalty on SNP-specific pleiotropic effects.}
 \item{lambda.alpha.grid}{Candidate tuning parameter sequence used for the l1 penalty on SNP-specific pleiotropic effects.}
 \item{pleiotropy}{Logical indicator of whether pleiotropic effects were modeled.}
-\item{initial.overlap}{Requested overlap setting for the internal initial estimator; operative when betawt = NULL.}
-\item{initial.pleiotropy}{Requested pleiotropy setting for the internal initial estimator; operative when betawt = NULL.}
 \item{beta.init}{Initial beta estimates used to construct adaptive weights.}
 \item{cv.loss.mean}{Array of mean cross-validation losses over repeated data-thinning folds.}
 \item{cv.loss.sd}{Array of estimated standard errors of the cross-validation losses.}
