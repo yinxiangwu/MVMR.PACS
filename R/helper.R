@@ -32,7 +32,15 @@ parse_overlap_correlation <- function(P, K, overlap = FALSE) {
 compute_overlap_bias <- function(se.exposure, se.outcome, rho.xy) {
   se.exposure <- as.matrix(se.exposure)
   se.outcome <- as.numeric(se.outcome)
-  as.numeric(colSums(se.exposure * (rho.xy / se.outcome)))
+
+  stopifnot(
+    length(se.outcome) == nrow(se.exposure),
+    length(rho.xy) == ncol(se.exposure)
+  )
+
+  as.numeric(
+    colSums(sweep(se.exposure, 1L, se.outcome, "/")) * rho.xy
+  )
 }
 
 make_joint_thinning_covariance <- function(se.exposure, se.outcome, P) {
